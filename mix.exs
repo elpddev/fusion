@@ -15,7 +15,10 @@ defmodule Fusion.Mixfile do
   # Type "mix help compile.app" for more information
   def application do
     # Specify extra applications you'll use from Erlang/Elixir
-    [extra_applications: [:logger]]
+    [extra_applications: [
+      :logger,
+      :erlexec
+    ]]
   end
 
   # Dependencies can be Hex packages:
@@ -28,6 +31,11 @@ defmodule Fusion.Mixfile do
   #
   # Type "mix help deps" for more examples and options
   defp deps do
-    []
+    [
+      {:erlexec, "~> 1.6.4"},
+      {:socket, "~> 0.3", only: :test},
+      #{:dockerex, "~> 0.1.0", only: :test}
+      {:dockerex, github: "hisea/dockerex", only: :test} #todo: official release
+    ]
   end
 end
