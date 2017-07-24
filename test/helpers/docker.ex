@@ -1,5 +1,7 @@
 defmodule Fusion.Test.Helpers.Docker do
 
+  alias Fusion.Net.Spot
+
   def init_docker_container(image_name) do
     %{"Id" => container_id, "Warnings" => _} = Dockerex.Client.post("containers/create", %{
       "Image": image_name,
@@ -15,7 +17,7 @@ defmodule Fusion.Test.Helpers.Docker do
 
     %{
       container_id: container_id,
-      server: %{host: container_ip, ssh_port: ssh_port},
+      server: %Spot{host: container_ip, port: ssh_port},
       auth: auth
     }   
   end 
