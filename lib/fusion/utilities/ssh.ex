@@ -62,22 +62,53 @@ defmodule Fusion.Utilities.Ssh do
   ## Examples
 
   iex> cmd("-nNT -R 3001:localhost:3002", %{username: "john", password: "abcd1234"},
-  ...>  "example.com")
-  "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -nNT -R 3001:localhost:3002 john@example.com"
+  ...>  %Fusion.Net.Spot{host: "example.com", port: 22})
+  "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -p 22 -nNT -R 3001:localhost:3002 john@example.com"
 
   iex> cmd("-nNT -R 3001:localhost:3002", %{username: "john", key_path: "/home/john/.ssh/id_rsa"},
-  ...>  "example.com")
-  "/usr/bin/env ssh -i /home/john/.ssh/id_rsa -nNT -R 3001:localhost:3002 john@example.com"
+  ...>  %Fusion.Net.Spot{host: "example.com", port: 22})
+  "/usr/bin/env ssh -p 22 -i /home/john/.ssh/id_rsa -nNT -R 3001:localhost:3002 john@example.com"
 
   """
-  def cmd(cmd, auth, host, ssh_path \\ @default_ssh_path)
+  def cmd(cmd, auth, remote, ssh_path \\ @default_ssh_path)
 
-  def cmd(cmd, %{username: username, password: password}, host, ssh_path) do
-    "#{partial_cmd_sshpass(password)} #{ssh_path} #{cmd} #{username}@#{host}"
+  def cmd(cmd, %{username: username, password: password}, 
+          %Spot{} = remote, ssh_path) do
+    "#{partial_cmd_sshpass(password)} #{ssh_path} -p #{remote.port} #{cmd} #{username}@#{remote.host}"
   end
 
-  def cmd(cmd, %{username: username, key_path: key_path}, host, ssh_path) do
+  def cmd(cmd, %{username: username, key_path: key_path}, 
+          %Spot{} = remote, ssh_path) do
 
-    "#{ssh_path} -i #{key_path} #{cmd} #{username}@#{host}"
+    "#{ssh_path} -p #{remote.port} -i #{key_path} #{cmd} #{username}@#{remote.host}"
   end
+
+  @doc """
+
+  ## Examples
+  
+  iex> cmd_port_tunnel(%{username: "john", password: "abcd1234"}, 
+  ...>   %Fusion.Net.Spot{host: "example.com", port: 22}, 
+  ...>   4567, 
+  ...>   %Fusion.Net.Spot{host: "localhost", port: 2345}, 
+  ...>   :reverse)
+  "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -p 22 -nNT -R 4567:localhost:2345 john@example.com"
+  """
+  def cmd_port_tunnel(auth, %Spot{} = remote, from_port, %Spot{} = to_spot, :reverse) do
+    partial_cmd_reverse_tunnel(from_port, to_spot)
+    |> cmd(auth, remote)
+  end
+
+  @doc """
+
+  ## Examples
+  
+  iex> cmd_port_tunnel(%{username: "john", password: "abcd1234"}, %Fusion.Net.Spot{host: "example.com", port: 22}, 4567, %Fusion.Net.Spot{host: "localhost", port: 2345}, :forward)
+  "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -p 22 -nNT -4 -L 4567:localhost:2345 john@example.com"
+  """
+  def cmd_port_tunnel(auth, remote, from_port, %Spot{} = to_spot, :forward) do
+    partial_cmd_forward_tunnel(from_port, to_spot)
+    |> cmd(auth, remote)
+  end
+
 end
