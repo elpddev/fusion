@@ -31,7 +31,9 @@ defmodule Fusion.ConnectorExternalTest do
     {:ok, connector} = Connector.start_link_now(context[:auth], context[:server])
 
     origin_node = Connector.get_origin_node(connector)
+    remote_node = Connector.get_remote_node(connector)
 
     Assert.assert_remote_port_up(context[:auth], context[:server], origin_node.port)
+    Assert.assert_local_port_up(remote_node.port)
   end
 end
