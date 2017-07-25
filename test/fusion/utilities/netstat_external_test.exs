@@ -3,9 +3,10 @@ defmodule Fusion.Utilities.NetstatExternalTest do
 
   alias Fusion.Utilities.Netstat
   alias Fusion.Utilities.Netcat
+  alias Fusion.Net
 
   test "cmd_netstat_port_grep", _context do
-    port = Fusion.Net.gen_port()
+    port = Net.gen_port()
     {:ok, _, _} = Netcat.cmd_listen(port)
     |> String.to_char_list |> :exec.run([])
 
