@@ -12,10 +12,11 @@ defmodule Fusion.ConnectorExternalTest do
   end
 
   setup _context do                      
+    {:ok, _} = Node.start(:"master@localhost", :shortnames)
+
     %{ container_id: container_id, server: server, auth: auth } = 
       Docker.init_docker_container("fusion_tester")
 
-    Node.start(:"master@localhost", :shortnames)
     Process.sleep(1000)                 
 
     on_exit fn ->                       
@@ -32,8 +33,10 @@ defmodule Fusion.ConnectorExternalTest do
 
     origin_node = Connector.get_origin_node(connector)
     remote_node = Connector.get_remote_node(connector)
+    epmd_remote_port = Connector.get_epmd_remote_port(connector)
 
     Assert.assert_remote_port_up(context[:auth], context[:server], origin_node.port)
     Assert.assert_local_port_up(remote_node.port)
+    Assert.assert_remote_port_up(context[:auth], context[:server], epmd_remote_port)
   end
 end

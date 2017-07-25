@@ -12,7 +12,9 @@ defmodule Fusion.Connector do
   defstruct auth: nil,
     remote: nil,
     origin_node: nil,
-    remote_node: nil
+    remote_node: nil,
+    epmd_port: nil,
+		epmd_remote_port: nil
 
 	## Public interface
 
@@ -36,6 +38,10 @@ defmodule Fusion.Connector do
 
   def get_remote_node(server) do
     GenServer.call(server, {:get_remote_node})
+  end
+
+  def get_epmd_remote_port(server) do
+    GenServer.call(server, {:get_epmd_remote_port})
   end
 
 	## Server Callbacks		
@@ -64,18 +70,28 @@ defmodule Fusion.Connector do
     {:reply, state.remote_node, state}
   end
 
+  def handle_call({:get_epmd_remote_port}, _, %Connector{} = state) do
+    {:reply, state.epmd_remote_port, state}
+  end
+
   def do_start_connector(%Connector{auth: auth, remote: remote} = state) do
     origin_node = Net.get_erl_node() 
     remote_node = gen_remote_node_info(origin_node.host, origin_node.cookie)
+    epmd_port = Net.get_epmd_port()
+    epmd_remote_port = Net.gen_port()
 
     open_tunnel_for_origin_node!(
       auth, remote, origin_node.port, %Spot{host: "localhost", port: origin_node.port})
     open_tunnel_for_remote_node!(
       auth, remote, remote_node.port, %Spot{host: "localhost", port: remote_node.port})
+    open_tunnel_for_origin_epmd!(
+      auth, remote, epmd_remote_port, %Spot{host: "localhost", port: epmd_port})
 
     {:reply, :ok, %Connector{state | 
       origin_node: origin_node,
-      remote_node: remote_node
+      remote_node: remote_node,
+      epmd_port: epmd_port,
+      epmd_remote_port: epmd_remote_port
     }}
   end
 
@@ -91,6 +107,13 @@ defmodule Fusion.Connector do
 
     {:ok, _} = SshPortTunnel.start_link_now(
       auth, remote, :forward, node_local_port, node_remote_spot)
+  end
+
+  def open_tunnel_for_origin_epmd!(
+    auth, %Spot{} = remote, epmd_remote_entrance, epmd_local_exit) do
+
+    {:ok, _} = SshPortTunnel.start_link_now(
+      auth, remote, :reverse, epmd_remote_entrance, epmd_local_exit)
   end
 
   def gen_remote_node_info(host, cookie) do

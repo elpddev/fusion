@@ -2,6 +2,8 @@ defmodule Fusion.Net do
   #alias Fusion.Net.Spot
   alias Fusion.Net.ErlNode
 
+  @default_epmd_port 4369
+
   @doc """
   """
   def gen_port(start_range \\ 49152, end_range \\ 65635) do
@@ -37,4 +39,19 @@ defmodule Fusion.Net do
   def node_self(full_name \\ Node.self()) do
     full_name |> Atom.to_string |> String.split("@") |> List.to_tuple
   end
+
+  def get_epmd_port(
+    port_str \\ System.get_env("ERL_EPMD_PORT"),
+    default \\ @default_epmd_port
+  ) do
+
+   # todo: Build logic based on: epmd_listen_sup.get_port_no/0
+   # https://github.com/erlang/epmd/blob/master/src/epmd_listen_sup.erl
+
+    case port_str do
+      nil -> default
+      _ -> String.to_integer(port_str)
+    end
+  end
+
 end
