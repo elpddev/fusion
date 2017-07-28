@@ -2,6 +2,8 @@ defmodule Fusion.Utilities.Netcat do
   @moduledoc """
   Wrapper module around netcat cli utility.
   """
+  
+  alias Fusion.Utilities.Bash
 
   @doc """
 
@@ -37,6 +39,6 @@ defmodule Fusion.Utilities.Netcat do
   "echo -n hello | nc -4u -q1 localhost 3455"
   """
   def cmd_send_udp_message(host, port, msg) do
-    "echo -n #{msg} | nc -4u -q1 #{host} #{port}"
+    "echo -n \"#{Bash.escape_str(msg)}\" | nc -4u -q1 #{host} #{port}"
   end
 end

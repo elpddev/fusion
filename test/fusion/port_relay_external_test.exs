@@ -114,6 +114,37 @@ defmodule Fusion.PortRelayExternalTest do
     end
   end
 
+  @tag provision_remote: true
+  test "activate remote udp->tcp relay successfuly", %{remote: %{auth: auth, server: server}} do
+    from_port = Net.gen_port()
+    to_port = Net.gen_port()
+    msg = "ping from client"
+    expected_msg = "#{msg}"
+
+    {:ok, _} = PortRelay.start_link_now(auth, server, from_port, :udp, to_port, :tcp)
+
+    Process.sleep(2000)
+    Assert.assert_remote_port_up(auth, server, from_port)
+
+    {:ok, netcat_pid, netcat_oid} = 
+      Netcat.cmd_listen(to_port)
+      |> Ssh.cmd_remote(auth, server)
+      |> String.to_char_list |> :exec.run([:stdout, :stderr])
+
+    Process.sleep(1000)
+
+    Netcat.cmd_send_udp_message("localhost", from_port, msg)
+    |> Ssh.cmd_remote(auth, server)
+    |> Exec.run_sync_printall()
+
+    receive do
+      res = {:stdout, ^netcat_oid, ^expected_msg} -> :ok
+    after 
+      5000 -> 
+        raise "did not got expected message"
+    end
+  end
+
   #todo: capture failure in genserver
   #test "fail activate tcp->udp relay with not supported combination" do
   #  from_port = Net.gen_port()
