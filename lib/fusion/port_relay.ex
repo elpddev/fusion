@@ -9,16 +9,26 @@ defmodule Fusion.PortRelay do
   alias Fusion.PortRelay
   alias Fusion.Utilities.Socat
   alias Fusion.Utilities.Exec
+  alias Fusion.Utilities.Ssh
+  alias Fusion.Utilities.Bash
 
   defstruct status: :off,
     from_port: nil,
     from_type: nil,
     to_port: nil,
     to_type: nil,
-    relay_pid: nil
+    relay_pid: nil,
+    auth: nil,
+    remote: nil,
+    location: nil
 
   def start_link(from_port, from_type, to_port, to_type) do
-    GenServer.start_link(__MODULE__, [from_port, from_type, to_port, to_type], [])
+    GenServer.start_link(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type], [])
+  end
+
+  def start_link(auth, remote, from_port, from_type, to_port, to_type) do
+    GenServer.start_link(__MODULE__, 
+                         [auth, remote, :remote, from_port, from_type, to_port, to_type], [])
   end
 
   def start_link_now(from_port, from_type, to_port, to_type) do
@@ -26,13 +36,29 @@ defmodule Fusion.PortRelay do
     :ok = start_tunnel(server) 
     res
   end
+  
+  def start_link_now(auth, remote, from_port, from_type, to_port, to_type) do
+    {:ok, server} = res = start_link(auth, remote, from_port, from_type, to_port, to_type)
+    :ok = start_tunnel(server) 
+    res
+  end
 
   def start(from_port, from_type, to_port, to_type) do
-    GenServer.start(__MODULE__, [from_port, from_type, to_port, to_type], [])
+    GenServer.start(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type], [])
+  end
+
+  def start(auth, remote, from_port, from_type, to_port, to_type) do
+    GenServer.start(__MODULE__, [auth, remote, :remote, from_port, from_type, to_port, to_type], [])
   end
 
   def start_now(from_port, from_type, to_port, to_type) do
     {:ok, server} = res = start(from_port, from_type, to_port, to_type)
+    :ok = start_tunnel(server) 
+    res
+  end
+
+  def start_now(auth, remote, from_port, from_type, to_port, to_type) do
+    {:ok, server} = res = start(auth, remote, from_port, from_type, to_port, to_type)
     :ok = start_tunnel(server) 
     res
   end
@@ -43,18 +69,33 @@ defmodule Fusion.PortRelay do
 
   ## Server Callbacks
   
-  def init([from_port, from_type, to_port, to_type]) do
+  def init([auth, remote, location, from_port, from_type, to_port, to_type]) do
     {:ok, %PortRelay{
       from_port: from_port,
       from_type: from_type,
       to_port: to_port,
-      to_type: to_type
+      to_type: to_type,
+      auth: auth,
+      remote: remote,
+      location: location
     }}
   end
 
-  def handle_call({:start_tunnel}, _from, %PortRelay{} = state) do
-    cmd_str = <<x :: binary>> = Socat.cmd(
+  def handle_call({:start_tunnel}, _from, %PortRelay{location: :local} = state) do
+    cmd_str = <<_x :: binary>> = Socat.cmd(
       state.from_port, state.from_type, state.to_port, state.to_type)
+    {:ok, relay_pid, _os_pid} = cmd_str |> Exec.capture_std_mon
+
+    {:reply, :ok, %PortRelay{state | relay_pid: relay_pid }}
+  end
+
+  def handle_call({:start_tunnel}, _from, %PortRelay{location: :remote} = state) do
+    socat_cmd_str = <<_x :: binary>> = Socat.cmd(
+      state.from_port, state.from_type, state.to_port, state.to_type)
+
+    cmd_str = Ssh.cmd("", state.auth, state.remote) <> " " <> 
+      "\"#{socat_cmd_str |> Bash.escape_str()}\""
+
     {:ok, relay_pid, _os_pid} = cmd_str |> Exec.capture_std_mon
 
     {:reply, :ok, %PortRelay{state | relay_pid: relay_pid }}

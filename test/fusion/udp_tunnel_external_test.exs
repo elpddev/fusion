@@ -3,7 +3,10 @@ defmodule Fusion.UdpTunnelExternalTest do
 
   alias Fusion.Test.Helpers.Docker
   alias Fusion.UdpTunnel
-  #alias Fusion.Utilities.Exec
+  alias Fusion.Utilities.Exec
+  alias Fusion.Utilities.Bash
+  alias Fusion.Utilities.Netcat
+  alias Fusion.Utilities.Ssh
   alias Fusion.Net.Spot
   alias Fusion.Net
 
@@ -30,6 +33,8 @@ defmodule Fusion.UdpTunnelExternalTest do
   test "open reverse udp tunnel with success", context do
     origin_port = Net.gen_port()
     remote_port = Net.gen_port()
+    msg = "hello"
+    expected_msg = "#{msg}"
 
     {:ok, _} = UdpTunnel.start_link_now(
       context[:auth], context[:server], 
@@ -37,5 +42,13 @@ defmodule Fusion.UdpTunnelExternalTest do
       remote_port,
       %Spot{host: "localhost", port: origin_port}
     ) 
+
+    udp_server = Socket.UDP.open!(origin_port)
+
+    Ssh.cmd("", context[:auth], context[:server]) <> " " <>  
+		"\"#{(Netcat.cmd_send_udp_message("localhost", remote_port, msg) |> Bash.escape_str())}\""
+    |> Exec.run_sync_printall
+
+    {:ok, {^expected_msg, _client}} = udp_server |> Socket.Datagram.recv(timeout: 2000)
   end
 end

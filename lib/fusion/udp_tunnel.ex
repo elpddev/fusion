@@ -7,6 +7,7 @@ defmodule Fusion.UdpTunnel do
   alias Fusion.Utilities.Exec
   alias Fusion.Net.Spot
   alias Fusion.Net
+  alias Fusion.PortRelay
 
   defstruct status: :off,
     ssh_tunnel_pid: nil,
@@ -58,11 +59,30 @@ defmodule Fusion.UdpTunnel do
       state.direction)
     |> Exec.capture_std_mon
 
+    {:ok, _} = PortRelay.start_link_now(
+      state.auth, state.remote, state.from_port, :udp, mediator_tcp_from_port, :tcp)
+    {:ok, _} = PortRelay.start_link_now(mediator_tcp_to_port, :tcp, state.to_spot.port, :udp)
+
     {:reply, :ok, %{ state | 
       ssh_tunnel_pid: tunnel_pid, 
       mediator_tcp_from_port: mediator_tcp_from_port,
       mediator_tcp_to_port: mediator_tcp_to_port,
       status: :after_connect_trial
     }}
+  end
+
+	def handle_info({:stdout, _proc_id, msg}, state) do
+		Logger.debug "stdout"
+		IO.inspect msg
+
+    # todo
+    {:noreply, state}
+  end
+
+  def handle_info({:stderr, _proc_id, _msg}, state) do
+    cond do
+      true ->
+        {:stop, :stderr, state}
+    end
   end
 end
