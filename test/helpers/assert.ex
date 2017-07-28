@@ -10,7 +10,7 @@ defmodule Fusion.Test.Helpers.Assert do
       |> Exec.run_sync_capture_std
     {:ok, [stdout: [out], stderr: [_]]} = rep |> IO.inspect
 
-    true = Regex.match?(netcat_port_greped_regex(target_port), out)
+    true = Regex.match?(netstat_port_greped_regex(target_port), out)
   end
 
   def assert_local_port_up(target_port) do
@@ -18,10 +18,10 @@ defmodule Fusion.Test.Helpers.Assert do
     |> Exec.run_sync_capture_std
     {:ok, [stdout: [out], stderr: [_]]} = rep |> IO.inspect
 
-    true = Regex.match?(netcat_port_greped_regex(target_port), out)
+    true = Regex.match?(netstat_port_greped_regex(target_port), out)
   end
 
-  def netcat_port_greped_regex(target_port) do
-    ~r/tcp.*127.0.0.1:#{target_port}.*LISTEN/
+  def netstat_port_greped_regex(target_port) do
+    ~r/((tcp)|(udp)).*127.0.0.1:#{target_port}.*/
   end
 end

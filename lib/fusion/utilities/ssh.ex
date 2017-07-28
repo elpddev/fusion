@@ -12,6 +12,7 @@ defmodule Fusion.Utilities.Ssh do
   """
     
   alias Fusion.Net.Spot
+  alias Fusion.Utilities.Bash
 
   @default_ssh_path "/usr/bin/env ssh"  
   @default_sshpass_path "/usr/bin/env sshpass"
@@ -81,6 +82,11 @@ defmodule Fusion.Utilities.Ssh do
           %Spot{} = remote, ssh_path) do
 
     "#{ssh_path} -p #{remote.port} -i #{key_path} #{cmd} #{username}@#{remote.host}"
+  end
+
+  def cmd_remote(remote_cmd, auth, remote) do
+    cmd("", auth, remote) <> " " <>
+    "\"#{remote_cmd |> Bash.escape_str()}\""
   end
 
   @doc """

@@ -2,8 +2,6 @@ defmodule Fusion.Utilities.Exec do
   @moduledoc """
   """
 
-
-
   def capture_std_mon(cmd) do
     cmd
     |> String.to_char_list

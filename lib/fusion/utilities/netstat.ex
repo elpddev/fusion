@@ -8,9 +8,9 @@ defmodule Fusion.Utilities.Netstat do
   ## Examples
   
   iex> cmd_netstat_port_grep(3005) 
-  "netstat -tlpn | grep :3005 | grep LISTEN"
+  "netstat -tulpn | grep :3005"
   """
   def cmd_netstat_port_grep(port) do
-    "netstat -tlpn | grep :#{port} | grep LISTEN"
+    "netstat -tulpn | grep :#{port}"
   end
 end
