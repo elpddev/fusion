@@ -59,9 +59,16 @@ defmodule Fusion.UdpTunnel do
       state.direction)
     |> Exec.capture_std_mon
 
-    {:ok, _} = PortRelay.start_link_now(
-      state.auth, state.remote, state.from_port, :udp, mediator_tcp_from_port, :tcp)
-    {:ok, _} = PortRelay.start_link_now(mediator_tcp_to_port, :tcp, state.to_spot.port, :udp)
+    case state.direction do
+      :reverse ->
+        {:ok, _} = PortRelay.start_link_now(
+          state.auth, state.remote, state.from_port, :udp, mediator_tcp_from_port, :tcp)
+        {:ok, _} = PortRelay.start_link_now(mediator_tcp_to_port, :tcp, state.to_spot.port, :udp)
+      :forward ->
+        {:ok, _} = PortRelay.start_link_now(state.from_port, :udp, mediator_tcp_from_port, :tcp)
+        {:ok, _} = PortRelay.start_link_now(
+          state.auth, state.remote, mediator_tcp_to_port, :tcp, state.to_spot.port, :udp)
+    end
 
     {:reply, :ok, %{ state | 
       ssh_tunnel_pid: tunnel_pid, 

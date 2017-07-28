@@ -109,10 +109,10 @@ defmodule Fusion.PortRelay do
     {:noreply, state}
   end
 
-  def handle_info({:stderr, _proc_id, _msg}, state) do
+  def handle_info({:stderr, _proc_id, msg}, state) do
     cond do
       true ->
-        {:stop, :stderr, state}
+        {:stop, {:stderr, msg}, state}
     end
   end
 
