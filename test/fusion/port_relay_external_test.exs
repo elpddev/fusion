@@ -18,26 +18,28 @@ defmodule Fusion.PortRelayExternalTest do
   end
 
   setup context do                      
-
     if context[:activate_node] do
       {:ok, _} = Node.start(:"master@localhost", :shortnames)
     end
 
-    if context[:provision_remote] do
-      %{ container_id: container_id, server: server, auth: auth } = 
-        Docker.init_docker_container("fusion_tester")
-      Process.sleep(1000)                 
+    remote =  case context[:provision_remote] do
+      true ->
+        %{ container_id: container_id, server: server, auth: auth } = 
+          Docker.init_docker_container("fusion_tester")
+        Process.sleep(1000)                 
+        %{auth: auth, server: server, container_id: container_id}
+      _ -> nil
     end
 
     on_exit fn ->                       
       if context[:activate_node], do: Node.stop()
       if context[:provision_remote] do 
         Process.sleep(500)                
-        Docker.remove_docker_container(container_id)
+        Docker.remove_docker_container(remote.container_id)
       end
     end 
         
-    {:ok, [remote: %{auth: auth, server: server, container_id: container_id}]} 
+    {:ok, [remote: remote]} 
   end
 
   test "activate tcp->udp relay successfuly" do
@@ -93,7 +95,7 @@ defmodule Fusion.PortRelayExternalTest do
     Process.sleep(1000)
     Assert.assert_remote_port_up(auth, server, from_port)
 
-    {:ok, netcat_pid, netcat_oid} = 
+    {:ok, _netcat_pid, netcat_oid} = 
       Netcat.cmd_listen_udp(to_port)
       |> Ssh.cmd_remote(auth, server)
       |> String.to_char_list |> :exec.run([:stdout, :stderr])
@@ -101,13 +103,12 @@ defmodule Fusion.PortRelayExternalTest do
     Process.sleep(1000)
 
     #TODO: telnet return code error on one line telnet. how to change it to success code 0.
-    telout = 
-      Telnet.cmd_telnet_message("localhost", from_port, msg)
-      |> Ssh.cmd_remote(auth, server)
-      |> Exec.run_sync_printall()
+    Telnet.cmd_telnet_message("localhost", from_port, msg)
+    |> Ssh.cmd_remote(auth, server)
+    |> Exec.run_sync_printall()
 
     receive do
-      res = {:stdout, ^netcat_oid, ^expected_msg} -> :ok
+      {:stdout, ^netcat_oid, ^expected_msg} -> :ok
     after 
       5000 -> 
         raise "did not got expected message"
@@ -126,7 +127,7 @@ defmodule Fusion.PortRelayExternalTest do
     Process.sleep(2000)
     Assert.assert_remote_port_up(auth, server, from_port)
 
-    {:ok, netcat_pid, netcat_oid} = 
+    {:ok, _netcat_pid, netcat_oid} = 
       Netcat.cmd_listen(to_port)
       |> Ssh.cmd_remote(auth, server)
       |> String.to_char_list |> :exec.run([:stdout, :stderr])
@@ -138,7 +139,7 @@ defmodule Fusion.PortRelayExternalTest do
     |> Exec.run_sync_printall()
 
     receive do
-      res = {:stdout, ^netcat_oid, ^expected_msg} -> :ok
+      {:stdout, ^netcat_oid, ^expected_msg} -> :ok
     after 
       5000 -> 
         raise "did not got expected message"
