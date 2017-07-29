@@ -36,7 +36,7 @@ defmodule Fusion.Utilities.Netcat do
   @doc """
 
   iex> cmd_send_udp_message("localhost", 3455, "hello")
-  "echo -n hello | nc -4u -q1 localhost 3455"
+  "echo -n \\\"hello\\\" | nc -4u -q1 localhost 3455"
   """
   def cmd_send_udp_message(host, port, msg) do
     "echo -n \"#{Bash.escape_str(msg)}\" | nc -4u -q1 #{host} #{port}"
