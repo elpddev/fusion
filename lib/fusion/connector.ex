@@ -3,6 +3,8 @@ defmodule Fusion.Connector do
     A GenServer for handling of opening a connection to a remote server and establishing the remote worker.
     """
 
+  use GenServer
+
   alias Fusion.Connector
   alias Fusion.Net.Spot
   alias Fusion.Net.ErlNode
