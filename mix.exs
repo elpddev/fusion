@@ -33,7 +33,7 @@ defmodule Fusion.Mixfile do
   defp deps do
     [
       {:erlexec, "~> 1.6.4"},
-      {:socket, "~> 0.3", only: :test},
+      {:socket, "~> 0.3"},
       #{:dockerex, "~> 0.1.0", only: :test}
       {:dockerex, github: "hisea/dockerex", only: :test} #todo: official release
     ]
