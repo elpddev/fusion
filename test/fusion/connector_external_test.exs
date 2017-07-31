@@ -34,9 +34,23 @@ defmodule Fusion.ConnectorExternalTest do
     origin_node = Connector.get_origin_node(connector)
     remote_node = Connector.get_remote_node(connector)
     epmd_remote_port = Connector.get_epmd_remote_port(connector)
+    boot_server_discovery_port = Connector.get_boot_server_discovery_port(connector)
+    remote_prim_loader_port = Connector.get_remote_prim_loader_port(connector)
+    boot_server_service_port = Connector.get_boot_server_service_port(connector)
+
+    Process.sleep(3000)
 
     Assert.assert_remote_port_up(context[:auth], context[:server], origin_node.port)
+
     Assert.assert_local_port_up(remote_node.port)
+    Assert.assert_remote_port_up(context[:auth], context[:server], remote_node.port)
+
     Assert.assert_remote_port_up(context[:auth], context[:server], epmd_remote_port)
+    Assert.assert_remote_port_up(context[:auth], context[:server], boot_server_discovery_port)
+
+    Assert.assert_local_port_up(remote_prim_loader_port)
+    Assert.assert_remote_port_up(context[:auth], context[:server], remote_prim_loader_port)
+
+    Assert.assert_remote_port_up(context[:auth], context[:server], boot_server_service_port)
   end
 end

@@ -12,7 +12,6 @@ defmodule Fusion.ErlBootServerAnalyzerExternalTest do
     {:ok, analyzer} = Analyzer.start_link_now()
     Analyzer.register_for_incoming_req(analyzer)
 
-
     remote_node_mock = Socket.UDP.open!()
     {:ok, source_port} = :inet.port(remote_node_mock)
     IO.puts "*** source port"

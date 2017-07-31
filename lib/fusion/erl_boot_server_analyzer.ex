@@ -19,7 +19,7 @@ defmodule Fusion.ErlBootServerAnalyzer do
   @contact_req_token_str (@contact_req_token |> List.to_string)
 
   defstruct status: :off,
-    udp_port: nil,
+    discovery_port: nil,
     udp_listener: nil,
     erl_version: nil,
     contact_req_token: nil,
@@ -45,25 +45,33 @@ defmodule Fusion.ErlBootServerAnalyzer do
     GenServer.call(server, {:register_for_incoming_req, self()})
   end
 
+  def get_discovery_port(server) do
+    GenServer.call(server, {:get_discovery_port})
+  end
+
   ## Server Callbacks
   
   def init([]) do
     {:ok, %Analyzer{
       status: :off,
-      udp_port: @eboot_port,
+      discovery_port: @eboot_port,
       erl_version: @erl_version,
       contact_req_token: @contact_req_token,
     }}
   end
   
   def handle_call({:start}, _from, %Analyzer{status: :off} = state) do
-    udp_listener = Socket.UDP.open!(state.udp_port, mode: :active)
+    udp_listener = Socket.UDP.open!(state.discovery_port, mode: :active)
 
     {:reply, :ok, %Analyzer{state | udp_listener: udp_listener}}
   end
 
   def handle_call({:register_for_incoming_req, listener}, _from, state) do
     {:reply, :ok, %Analyzer{state | incoming_req_listener: listener}}
+  end
+
+  def handle_call({:get_discovery_port}, _from, %Analyzer{discovery_port: discovery_port} = state) do
+    {:reply, discovery_port, state}
   end
 
   def handle_info({:udp, _udp_listener, sender_ip, sender_port, @contact_req_token_str}, state) do

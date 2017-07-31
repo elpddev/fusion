@@ -11,6 +11,14 @@ defmodule Fusion.Net do
     start_range + :rand.uniform(range)
   end
 
+  @doc """
+  Get erlang network node details. Return name/host, port, and cookie.
+
+  ## Examples
+
+  iex> get_erl_node({"master", "localhost"}, 5678, :abcd1234)
+  %Fusion.Net.ErlNode{name: "master", host: "localhost", port: 5678, cookie: :abcd1234}
+  """
   def get_erl_node(
     {name, host} \\ node_self(),
     port \\ get_self_port_from_epmd(),
@@ -20,6 +28,9 @@ defmodule Fusion.Net do
     %ErlNode{name: name, host: host, port: port, cookie: cookie}
   end
 
+  @doc """
+  Get erlang network node self port. Internally use epmd for query self info. 
+  """
   def get_self_port_from_epmd({name, host} \\ node_self()) do
     {:port, port, _} = :erl_epmd.port_please(
 		  name |> String.to_charlist(),
@@ -30,6 +41,7 @@ defmodule Fusion.Net do
   end
 
   @doc """
+  Get erlang network node self name parsed to tupple. {name, host}.
 
   ## Examples
   
@@ -40,6 +52,9 @@ defmodule Fusion.Net do
     full_name |> Atom.to_string |> String.split("@") |> List.to_tuple
   end
 
+  @doc """
+  Get epmd service external port.
+  """
   def get_epmd_port(
     port_str \\ System.get_env("ERL_EPMD_PORT"),
     default \\ @default_epmd_port
