@@ -1,0 +1,42 @@
+FROM buildpack-deps:jessie
+                                        
+# https://stackoverflow.com/questions/30172605/how-to-get-into-a-docker-container
+
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    sudo \
+    net-tools \
+    telnet \
+    netcat-openbsd \
+    socat \
+    supervisor \
+    git \
+    build-essential \
+    autoconf \
+    m4 \
+    libncurses5-dev \
+    libwxgtk3.0-dev \ 
+    libgl1-mesa-dev \
+    libglu1-mesa-dev \
+    libpng3 \
+    libssh-dev
+
+# Test user
+RUN useradd --create-home --shell /bin/bash --groups sudo test_user 
+RUN echo "test_user:test_password" | chpasswd
+
+# Erlang
+RUN su test_user -c "git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.3.0"
+RUN su test_user -c "/home/test_user/.asdf/bin/asdf plugin-add erlang https://github.com/asdf-vm/asdf-erlang.git"
+RUN su test_user -c "/home/test_user/.asdf/bin/asdf install erlang 19.3"
+RUN su test_user -c "/home/test_user/.asdf/bin/asdf global erlang 19.3"
+
+RUN su test_user -c "echo -e '\n. /home/test_user/.asdf/asdf.sh' | cat - ~/.bashrc > ~/temp && mv ~/temp ~/.bashrc"
+RUN su test_user -c "echo -e '\n. /home/test_user/.asdf/completions/asdf.bash' | cat - ~/.bashrc > ~/temp && mv ~/temp ~/.bashrc"
+
+# Sshd
+RUN mkdir /var/run/sshd                 
+RUN chmod 0755 /var/run/sshd            
+    
+#CMD /usr/sbin/sshd && erl              
+CMD /usr/sbin/sshd && supervisord -n 

@@ -6,6 +6,8 @@ defmodule Fusion.PortRelay do
   use GenServer
 	require Logger
 
+  @socat_conn_refused_err_regex ~r/.*socat.*: Connection refused.*/
+
   alias Fusion.PortRelay
   alias Fusion.Utilities.Socat
   alias Fusion.Utilities.Exec
@@ -20,45 +22,46 @@ defmodule Fusion.PortRelay do
     relay_pid: nil,
     auth: nil,
     remote: nil,
-    location: nil
+    location: nil,
+    allow_connection_refused: false
 
-  def start_link(from_port, from_type, to_port, to_type) do
-    GenServer.start_link(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type], [])
+  def start_link(from_port, from_type, to_port, to_type, args \\ []) do
+    GenServer.start_link(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type, args], [])
   end
 
-  def start_link(auth, remote, from_port, from_type, to_port, to_type) do
-    GenServer.start_link(__MODULE__, 
-                         [auth, remote, :remote, from_port, from_type, to_port, to_type], [])
+  def start_link(auth, remote, from_port, from_type, to_port, to_type, args \\ []) do
+    GenServer.start_link(
+      __MODULE__, [auth, remote, :remote, from_port, from_type, to_port, to_type, args], [])
   end
 
-  def start_link_now(from_port, from_type, to_port, to_type) do
-    {:ok, server} = res = start_link(from_port, from_type, to_port, to_type)
+  def start_link_now(from_port, from_type, to_port, to_type, args \\ []) do
+    {:ok, server} = res = start_link(from_port, from_type, to_port, to_type, args)
     :ok = start_tunnel(server) 
     res
   end
   
-  def start_link_now(auth, remote, from_port, from_type, to_port, to_type) do
-    {:ok, server} = res = start_link(auth, remote, from_port, from_type, to_port, to_type)
+  def start_link_now(auth, remote, from_port, from_type, to_port, to_type, args \\ []) do
+    {:ok, server} = res = start_link(auth, remote, from_port, from_type, to_port, to_type, args)
     :ok = start_tunnel(server) 
     res
   end
 
-  def start(from_port, from_type, to_port, to_type) do
-    GenServer.start(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type], [])
+  def start(from_port, from_type, to_port, to_type, args \\ []) do
+    GenServer.start(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type, args], [])
   end
 
-  def start(auth, remote, from_port, from_type, to_port, to_type) do
-    GenServer.start(__MODULE__, [auth, remote, :remote, from_port, from_type, to_port, to_type], [])
+  def start(auth, remote, from_port, from_type, to_port, to_type, args \\ []) do
+    GenServer.start(__MODULE__, [auth, remote, :remote, from_port, from_type, to_port, to_type, args], [])
   end
 
-  def start_now(from_port, from_type, to_port, to_type) do
-    {:ok, server} = res = start(from_port, from_type, to_port, to_type)
+  def start_now(from_port, from_type, to_port, to_type, args \\ []) do
+    {:ok, server} = res = start(from_port, from_type, to_port, to_type, args)
     :ok = start_tunnel(server) 
     res
   end
 
-  def start_now(auth, remote, from_port, from_type, to_port, to_type) do
-    {:ok, server} = res = start(auth, remote, from_port, from_type, to_port, to_type)
+  def start_now(auth, remote, from_port, from_type, to_port, to_type, args \\ []) do
+    {:ok, server} = res = start(auth, remote, from_port, from_type, to_port, to_type, args)
     :ok = start_tunnel(server) 
     res
   end
@@ -69,7 +72,7 @@ defmodule Fusion.PortRelay do
 
   ## Server Callbacks
   
-  def init([auth, remote, location, from_port, from_type, to_port, to_type]) do
+  def init([auth, remote, location, from_port, from_type, to_port, to_type, args]) do
     {:ok, %PortRelay{
       from_port: from_port,
       from_type: from_type,
@@ -77,7 +80,8 @@ defmodule Fusion.PortRelay do
       to_type: to_type,
       auth: auth,
       remote: remote,
-      location: location
+      location: location,
+      allow_connection_refused: Keyword.get(args, :allow_connection_refused, false)
     }}
   end
 
@@ -111,6 +115,11 @@ defmodule Fusion.PortRelay do
 
   def handle_info({:stderr, _proc_id, msg}, state) do
     cond do
+      Regex.match?(@socat_conn_refused_err_regex, msg) ->
+        case state.allow_connection_refused do
+          true -> {:noreply, state}
+          _ -> {:stop, :connection_refused_in_tunnel, state}
+        end
       true ->
         {:stop, {:stderr, msg}, state}
     end

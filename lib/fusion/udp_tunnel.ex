@@ -17,18 +17,18 @@ defmodule Fusion.UdpTunnel do
     from_port: nil,
     to_spot: nil,
     mediator_tcp_from_port: nil,
-    mediator_tcp_to_port: nil
+    mediator_tcp_to_port: nil,
+    allow_connection_refused: false
 
   use GenServer
   require Logger
 
-  def start_link(auth, remote, direction, from_port, to_spot) do
-    GenServer.start_link(__MODULE__, [auth, remote, direction, from_port, to_spot], [])
+  def start_link(auth, remote, direction, from_port, to_spot, args \\ []) do
+    GenServer.start_link(__MODULE__, [auth, remote, direction, from_port, to_spot, args], [])
   end
 
-  def start_link_now(auth, remote, direction, from_port, to_spot) do
-    {:ok, server} = res = GenServer.start_link(__MODULE__, [
-      auth, remote, direction, from_port, to_spot], [])
+  def start_link_now(auth, remote, direction, from_port, to_spot, args \\ []) do
+    {:ok, server} = res = start_link(auth, remote, direction, from_port, to_spot, args)
     :ok = start_tunnel(server)
     res
   end
@@ -39,13 +39,14 @@ defmodule Fusion.UdpTunnel do
 
   ## Server Callbacks
   
-  def init([auth, remote, direction, from_port, to_spot]) do
+  def init([auth, remote, direction, from_port, to_spot, args]) do
     {:ok, %UdpTunnel{
       auth: auth,
       remote: remote,
       direction: direction,
       from_port: from_port,
-      to_spot: to_spot
+      to_spot: to_spot,
+      allow_connection_refused: Keyword.get(args, :allow_connection_refused, false)
     }}
   end
 
@@ -63,11 +64,16 @@ defmodule Fusion.UdpTunnel do
       :reverse ->
         {:ok, _} = PortRelay.start_link_now(
           state.auth, state.remote, state.from_port, :udp, mediator_tcp_from_port, :tcp)
-        {:ok, _} = PortRelay.start_link_now(mediator_tcp_to_port, :tcp, state.to_spot.port, :udp)
+        {:ok, _} = PortRelay.start_link_now(
+          mediator_tcp_to_port, :tcp, state.to_spot.port, :udp,
+          allow_connection_refused: state.allow_connection_refused
+        )
       :forward ->
         {:ok, _} = PortRelay.start_link_now(state.from_port, :udp, mediator_tcp_from_port, :tcp)
         {:ok, _} = PortRelay.start_link_now(
-          state.auth, state.remote, mediator_tcp_to_port, :tcp, state.to_spot.port, :udp)
+          state.auth, state.remote, mediator_tcp_to_port, :tcp, state.to_spot.port, :udp,
+          allow_connection_refused: state.allow_connection_refused
+        )
     end
 
     {:reply, :ok, %{ state | 

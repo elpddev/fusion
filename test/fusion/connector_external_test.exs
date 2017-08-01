@@ -28,29 +28,35 @@ defmodule Fusion.ConnectorExternalTest do
     {:ok, [auth: auth, server: server, container_id: container_id, ]} 
   end
 
+  @tag timeout: 1500000
   test "start a connector successfuly", context do
     {:ok, connector} = Connector.start_link_now(context[:auth], context[:server])
 
-    origin_node = Connector.get_origin_node(connector)
+    Process.sleep(154000)
+
+    origin_node_tunnel = Connector.get_origin_node_tunnel(connector)
+    Assert.assert_remote_port_up(context[:auth], context[:server], origin_node_tunnel.from_port)
+
+    remote_node_tunnel = Connector.get_remote_node_tunnel(connector)
+    Assert.assert_local_port_up(remote_node_tunnel.from_port)
+
     remote_node = Connector.get_remote_node(connector)
-    epmd_remote_port = Connector.get_epmd_remote_port(connector)
-    boot_server_discovery_port = Connector.get_boot_server_discovery_port(connector)
-    remote_prim_loader_port = Connector.get_remote_prim_loader_port(connector)
-    boot_server_service_port = Connector.get_boot_server_service_port(connector)
-
-    Process.sleep(3000)
-
-    Assert.assert_remote_port_up(context[:auth], context[:server], origin_node.port)
-
-    Assert.assert_local_port_up(remote_node.port)
     Assert.assert_remote_port_up(context[:auth], context[:server], remote_node.port)
 
-    Assert.assert_remote_port_up(context[:auth], context[:server], epmd_remote_port)
-    Assert.assert_remote_port_up(context[:auth], context[:server], boot_server_discovery_port)
+    origin_epmd_tunnel = Connector.get_origin_epmd_tunnel(connector)
+    Assert.assert_remote_port_up(context[:auth], context[:server], origin_epmd_tunnel.from_port)
 
-    Assert.assert_local_port_up(remote_prim_loader_port)
-    Assert.assert_remote_port_up(context[:auth], context[:server], remote_prim_loader_port)
+    boot_server_discovery_tunnel = Connector.get_boot_server_discovery_tunnel(connector)
+    Assert.assert_remote_port_up(context[:auth], context[:server], 
+                                 boot_server_discovery_tunnel.from_port)
 
-    Assert.assert_remote_port_up(context[:auth], context[:server], boot_server_service_port)
+    remote_prim_loader_discoverer_tunnel = 
+      Connector.get_remote_prim_loader_discoverer_tunnel(connector)
+    Assert.assert_local_port_up(remote_prim_loader_discoverer_tunnel.from_port)
+    Assert.assert_remote_port_up(
+      context[:auth], context[:server], remote_prim_loader_discoverer_tunnel.to_spot.port)
+
+    boot_server_tunnel = Connector.get_boot_server_tunnel(connector)
+    Assert.assert_remote_port_up(context[:auth], context[:server], boot_server_tunnel.from_port)
   end
 end

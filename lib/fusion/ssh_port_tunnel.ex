@@ -66,7 +66,8 @@ defmodule Fusion.SshPortTunnel do
 
     {:ok, tunnel_pid, _os_pid} = 
       Ssh.cmd_port_tunnel(
-        state.auth, state.remote, state.from_port, state.to_spot, 
+        state.auth, state.remote, 
+        state.from_port, state.to_spot, 
         state.direction)
     |> Exec.capture_std_mon
 

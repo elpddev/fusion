@@ -4,6 +4,7 @@ defmodule Fusion.Connector do
     """
 
   use GenServer
+  require Logger
 
   @eboot_port 4368 
 
@@ -42,13 +43,41 @@ defmodule Fusion.Connector do
       
   def start_link_now(auth, remote) do   
     {:ok, server} = res = start_link(auth, remote)
-    :ok = start_connector(server)    
+    start_connector(server)    
     res 
   end
 
   def start_connector(server) do        
     GenServer.cast(server, {:start_connector})
   end 
+
+  def get_origin_node_tunnel(server) do
+    GenServer.call(server, {:get_origin_node_tunnel})
+  end
+
+  def get_remote_node_tunnel(server) do
+    GenServer.call(server, {:get_remote_node_tunnel})
+  end
+
+  def get_remote_node(server) do
+    GenServer.call(server, {:get_remote_node})
+  end
+
+  def get_origin_epmd_tunnel(server) do
+    GenServer.call(server, {:get_origin_epmd_tunnel})
+  end
+
+  def get_boot_server_discovery_tunnel(server) do
+    GenServer.call(server, {:get_boot_server_discovery_tunnel})
+  end
+
+  def get_remote_prim_loader_discoverer_tunnel(server) do
+    GenServer.call(server, {:get_remote_prim_loader_discoverer_tunnel})
+  end
+
+  def get_boot_server_tunnel(server) do
+    GenServer.call(server, {:get_boot_server_tunnel})
+  end
 
 	## Server Callbacks		
 
@@ -65,11 +94,40 @@ defmodule Fusion.Connector do
     end
   end
 
-  def handle_cast({:start_connector}, _, %Connector{
+  def handle_call({:get_origin_node_tunnel}, _from, state) do
+    {:reply, state.origin_node_tunnel, state}
+  end
+
+  def handle_call({:get_remote_node}, _from, state) do
+    {:reply, state.remote_node, state}
+  end
+
+  def handle_call({:get_remote_node_tunnel}, _from, state) do
+    {:reply, state.remote_node_tunnel, state}
+  end
+  
+  def handle_call({:get_origin_epmd_tunnel}, _from, state) do
+    {:reply, state.origin_epmd_tunnel, state}
+  end
+
+  def handle_call({:get_boot_server_discovery_tunnel}, _from, state) do
+    {:reply, state.boot_server_discovery_port, state}
+  end
+
+  def handle_call({:get_remote_prim_loader_discoverer_tunnel}, _from, state) do
+    {:reply, state.remote_prim_loader_discoverer_tunnel, state}
+  end
+
+  def handle_call({:get_boot_server_tunnel}, _from, state) do
+    {:reply, state.boot_server_tunnel, state}
+  end
+
+  def handle_cast({:start_connector}, %Connector{
     auth: auth, 
     remote: remote, 
     status: :off
   } = state) do
+    Logger.debug("start connector")
 
     origin_node = Net.get_erl_node()
     {:ok, origin_node_tunnel} = open_tunnel_for_origin_node(auth, remote, origin_node)
@@ -81,6 +139,7 @@ defmodule Fusion.Connector do
     {:ok, boot_server_analyzer} = start_boot_server_analyzer(boot_server_discovery_port)
     {:ok, boot_server_discovery_tunnel} = open_boot_server_discovery_tunnel(
       auth, remote, boot_server_discovery_port) 
+    Process.sleep(2000)
     :ok = start_remote_node(auth, remote, remote_node, origin_epmd_tunnel.from_port) 
 
     {:noreply, %Connector{state |
@@ -101,6 +160,9 @@ defmodule Fusion.Connector do
     {:incoming_udp_contact_req, {127, 0, 0, 1}, remote_prim_loader_discoverer_port}, 
     %Connector{ status: :waiting_remote_prim_loader_contact, } = state) do
 
+    Logger.debug("incoming udp contact req")
+    IO.inspect(remote_prim_loader_discoverer_port)
+
     Process.send(self(), {:start_connector}, []) 
 
     {:noreply, %Connector{state | 
@@ -115,10 +177,12 @@ defmodule Fusion.Connector do
     status: :received_remote_prim_loader_contact
   } = state) do
 
+    Logger.debug("continue connector")
+
     GenServer.stop(state.boot_server_analyzer)
 
     {:ok, remote_prim_loader_discoverer_tunnel} = start_tunnel_remote_prim_loader_discoverer(
-      auth, remote, state.remote_prom_loader_discoverer_port) 
+      auth, remote, state.remote_prim_loader_discoverer_port) 
     {:ok, boot_server_port} = start_boot_server(state.boot_server_discovery_port)
     {:ok, boot_server_tunnel} = start_boot_server_tunnel(auth, remote, boot_server_port)
     :ok = connect_remote_node(state.remote_node)
@@ -201,7 +265,8 @@ defmodule Fusion.Connector do
     {:ok, tunnel_pid} = UdpTunnel.start_link_now(
       auth, remote, :reverse, 
       from_port,
-      to_spot)
+      to_spot,
+      allow_connection_refused: true)
 
     {:ok, %{
       from_port: from_port,
@@ -216,6 +281,7 @@ defmodule Fusion.Connector do
     {:ok, _pid, _osid} = 
       Erl.cmd_erl_inet_loader(remote_node, epmd_port)
       |> Ssh.cmd_remote(auth, remote)
+      |> IO.inspect # debug
       |> String.to_char_list 
       |> :exec.run([:stdout, :stderr])
 
@@ -223,6 +289,10 @@ defmodule Fusion.Connector do
   end
 
   def start_tunnel_remote_prim_loader_discoverer(auth, remote, discoverer_port) do
+    Logger.debug("start_tunnel_remote_prim_loader_discoverer")
+
+    Process.sleep(500)
+
     from_port = discoverer_port
     to_spot = %Spot{host: "localhost", port: discoverer_port} 
 
@@ -241,6 +311,8 @@ defmodule Fusion.Connector do
   end
 
   def start_boot_server(_discovery_port) do
+    Logger.debug("start boot server")
+
     {:ok, boot_server} = :erl_boot_server.start([{127, 0, 0, 1}])
 
     Process.sleep(500)
@@ -255,8 +327,10 @@ defmodule Fusion.Connector do
   end
 
   def start_boot_server_tunnel(auth, remote, boot_server_port) do
+    Logger.debug "start boot server tunnel"
+
     from_port = boot_server_port
-    to_spot = %{host: "localhost", port: boot_server_port}
+    to_spot = %Spot{host: "localhost", port: boot_server_port}
 
     {:ok, tunnel_pid} = SshPortTunnel.start_link_now(
       auth, remote, :reverse, from_port, to_spot)
@@ -271,6 +345,11 @@ defmodule Fusion.Connector do
   end
 
   def connect_remote_node(%ErlNode{} = remote_node) do
+    Logger.debug "connect remote node"
+    IO.inspect(remote_node)
+
+    Process.sleep(1600000)
+
     true = 
       :"#{remote_node.name}@#{remote_node.host}"
       |> Node.connect()
