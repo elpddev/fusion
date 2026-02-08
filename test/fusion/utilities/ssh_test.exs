@@ -1,5 +1,4 @@
 defmodule Fusion.Utilities.SshTest do
-  use ExUnit.Case
-  doctest Fusion.Utilities.Ssh, import: true
-
+  use ExUnit.Case, async: true
+  doctest Fusion.Utilities.Ssh
 end

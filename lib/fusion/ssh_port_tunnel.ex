@@ -1,100 +1,83 @@
 defmodule Fusion.SshPortTunnel do
-  @moduledoc """
-  A GenServer for handling of opening ssh ports tunnels and observing their state.
-  """
+  @moduledoc "GenServer for managing SSH port tunnels (forward and reverse)."
 
   use GenServer
-	require Logger
+  require Logger
 
   alias Fusion.Utilities.Exec
   alias Fusion.Utilities.Ssh
-  alias Fusion.SshPortTunnel
-
-  @conn_refused_err_regex ~r/ssh: connect to host.*Connection refused.*/
-  @cannot_assign_requested_address_regex ~r/bind: Cannot assign requested address.*/
 
   defstruct auth: nil,
-    remote: nil,
-    direction: nil,
-    from_port: nil,
-    to_spot: nil,
-    status: :off,
-    ssh_tunnel_pid: nil
+            remote: nil,
+            direction: nil,
+            from_port: nil,
+            to_spot: nil,
+            status: :off,
+            ssh_tunnel_port: nil,
+            os_pid: nil
+
+  ## Public API
 
   def start_link(auth, remote, direction, from_port, to_spot) do
-    GenServer.start_link(__MODULE__, 
-     [auth, remote, direction, from_port, to_spot], [])
+    GenServer.start_link(__MODULE__, [auth, remote, direction, from_port, to_spot])
   end
 
   def start_link_now(auth, remote, direction, from_port, to_spot) do
-    {:ok, server} = res = start_link(
-      auth, remote, direction, from_port, to_spot)
+    {:ok, server} = res = start_link(auth, remote, direction, from_port, to_spot)
     :ok = start_tunnel(server)
-    res 
-  end
-
-  def start(auth, remote, direction, from_port, to_spot) do
-    GenServer.start(__MODULE__, 
-     [auth, remote, direction, from_port, to_spot], [])
-  end
-
-  def start_now(auth, remote, direction, from_port, to_spot) do
-    {:ok, server} = res = start(
-      auth, remote, direction, from_port, to_spot)
-    :ok = start_tunnel(server)
-    res 
+    res
   end
 
   def start_tunnel(server) do
-    GenServer.call(server, {:start_tunnel})
+    GenServer.call(server, :start_tunnel)
   end
 
-  ## Server Callbacks
-  
+  ## Callbacks
+
+  @impl true
   def init([auth, remote, direction, from_port, to_spot]) do
-    {:ok, %SshPortTunnel{ 
-      auth: auth, 
-      remote: remote, 
-      direction: direction,
-      from_port: from_port, 
-      to_spot: to_spot,
-    }}
+    {:ok,
+     %__MODULE__{
+       auth: auth,
+       remote: remote,
+       direction: direction,
+       from_port: from_port,
+       to_spot: to_spot
+     }}
   end
 
-  def handle_call({:start_tunnel}, _from, 
-    %SshPortTunnel{status: :off} = state) do
-
-    {:ok, tunnel_pid, _os_pid} = 
+  @impl true
+  def handle_call(:start_tunnel, _from, %__MODULE__{status: :off} = state) do
+    cmd =
       Ssh.cmd_port_tunnel(
-        state.auth, state.remote, state.from_port, state.to_spot, 
-        state.direction)
-    |> Exec.capture_std_mon
+        state.auth,
+        state.remote,
+        state.from_port,
+        state.to_spot,
+        state.direction
+      )
 
-    {:reply, :ok, %{ state | ssh_tunnel_pid: tunnel_pid, 
-      status: :after_connect_trial}}
+    {:ok, port, os_pid} = Exec.capture_std_mon(cmd)
+
+    {:reply, :ok, %{state | ssh_tunnel_port: port, os_pid: os_pid, status: :connected}}
   end
 
-	def handle_info({:stdout, _proc_id, msg}, state) do
-		Logger.debug "stdout"
-		IO.inspect msg
-
-    # todo
+  @impl true
+  def handle_info({port, {:data, _data}}, %{ssh_tunnel_port: port} = state) do
     {:noreply, state}
   end
 
-  def handle_info({:stderr, _proc_id, msg}, state) do
-    cond do
-      Regex.match?(@conn_refused_err_regex, msg) ->
-        {:stop, :conn_refused, state}
-      Regex.match?(@cannot_assign_requested_address_regex, msg) ->
-        {:stop, :address_binding_failure, state}
-      true ->
-        {:stop, :stderr, state}
-    end
+  def handle_info({port, {:exit_status, _status}}, %{ssh_tunnel_port: port} = state) do
+    {:stop, :tunnel_exited, state}
   end
 
-  def handle_info({:DOWN, _os_id, :process, _pid, _status}, state) do
-    {:stop, :error_termination_in_exec_process, state}
+  @impl true
+  def terminate(_reason, %{os_pid: os_pid} = _state) when is_integer(os_pid) do
+    System.cmd("kill", [to_string(os_pid)])
+    :ok
+  rescue
+    _ -> :ok
   end
 
+  def terminate(_reason, _state), do: :ok
 end
