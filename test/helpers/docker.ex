@@ -1,61 +1,78 @@
 defmodule Fusion.Test.Helpers.Docker do
+  @moduledoc "Docker container management for external tests."
 
-  alias Fusion.Net.Spot
+  @container_name "fusion_test_ssh"
+  @ssh_port 2222
+  @username "fusion_test"
+  @password "fusion_pass"
 
-  def init_docker_container(image_name) do
-    %{"Id" => container_id, "Warnings" => _} = Dockerex.Client.post("containers/create", %{
-      "Image": image_name,
-      "Tty": true,
-    })
+  @doc "Check if the test container is running."
+  def container_running? do
+    {output, 0} = System.cmd("docker", ["ps", "--format", "{{.Names}}"], stderr_to_stdout: true)
+    String.contains?(output, @container_name)
+  rescue
+    _ -> false
+  end
 
-    nil = Dockerex.Client.post("containers/#{container_id}/start")
+  @doc "Get the SSH key path for the test container."
+  def key_path do
+    Path.join([docker_dir(), ".keys", "test_key"])
+  end
 
-    %{ "NetworkSettings" => %{"Networks" => %{"bridge" => %{"IPAddress" => container_ip }}}} =
-      Dockerex.Client.get("containers/#{container_id}/json")
-
-    %{auth: auth, ssh_port: ssh_port} = get_image_info(image_name)
-
-    %{
-      container_id: container_id,
-      server: %Spot{host: container_ip, port: ssh_port},
-      auth: auth
-    }   
-  end 
-
-  def get_image_info("fusion_tester") do
-    %{
-      auth: %{username: "test_user", password: "test_password"},
-      ssh_port: 22
+  @doc "Get the test target for connecting to the Docker container."
+  def target do
+    %Fusion.Target{
+      host: "localhost",
+      port: @ssh_port,
+      username: @username,
+      auth: {:key, key_path()}
     }
   end
-      
-  def docker_conf_expose(test_port) do  
-    %{
-      "ExposedPorts": %{                
-        "20000/tcp": %{}                
-      },
-      "HostConfig": %{                  
-        "PortBindings": %{
-          "#{test_port}/tcp": [         
-            %{
-              "HostPort": "#{test_port}"
-            }
-          ]
-        },
-      },
-    } 
-  end 
-    
-  def remove_docker_container(container_id) do
-    #Dockerex.Client.post("containers/#{container_id}/stop", %{ "t" => 15 }, 
-    #  default_headers(), recv_timeout: 15000)
-    Dockerex.Client.post("containers/#{container_id}/kill", %{}, default_headers(), recv_timeout: 15000)
 
-    Dockerex.Client.delete("containers/#{container_id}") 
+  @doc "Get a password-based target for the Docker container."
+  def target_password do
+    %Fusion.Target{
+      host: "localhost",
+      port: @ssh_port,
+      username: @username,
+      auth: {:password, @password}
+    }
   end
 
-  def default_headers do
-    {:ok , hostname} = :inet.gethostname
-    %{"Content-Type" => "application/json", "Host" => hostname}
+  @doc "Check if Docker and the test container are available."
+  def available? do
+    container_running?() and File.exists?(key_path())
+  end
+
+  @doc "Verify SSH connectivity to the container."
+  def ssh_works? do
+    {_output, exit_code} =
+      System.cmd(
+        "ssh",
+        [
+          "-i",
+          key_path(),
+          "-p",
+          to_string(@ssh_port),
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "StrictHostKeyChecking=no",
+          "-o",
+          "ConnectTimeout=5",
+          "#{@username}@localhost",
+          "echo",
+          "ok"
+        ],
+        stderr_to_stdout: true
+      )
+
+    exit_code == 0
+  rescue
+    _ -> false
+  end
+
+  defp docker_dir do
+    Path.join([File.cwd!(), "test", "docker"])
   end
 end

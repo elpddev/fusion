@@ -1,41 +1,28 @@
-defmodule Fusion.Mixfile do
+defmodule Fusion.MixProject do
   use Mix.Project
 
   def project do
-    [app: :fusion,
-     version: "0.1.0",
-     elixir: "~> 1.4",
-     build_embedded: Mix.env == :prod,
-     start_permanent: Mix.env == :prod,
-     deps: deps()]
-  end
-
-  # Configuration for the OTP application
-  #
-  # Type "mix help compile.app" for more information
-  def application do
-    # Specify extra applications you'll use from Erlang/Elixir
-    [extra_applications: [
-      :logger,
-      :erlexec
-    ]]
-  end
-
-  # Dependencies can be Hex packages:
-  #
-  #   {:my_dep, "~> 0.3.0"}
-  #
-  # Or git/path repositories:
-  #
-  #   {:my_dep, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
-  #
-  # Type "mix help deps" for more examples and options
-  defp deps do
     [
-      {:erlexec, "~> 1.6.4"},
-      {:socket, "~> 0.3"},
-      #{:dockerex, "~> 0.1.0", only: :test}
-      {:dockerex, github: "hisea/dockerex", only: :test} #todo: official release
+      app: :fusion,
+      version: "0.1.0",
+      elixir: "~> 1.18",
+      start_permanent: Mix.env() == :prod,
+      deps: deps(),
+      elixirc_paths: elixirc_paths(Mix.env())
     ]
+  end
+
+  def application do
+    [
+      extra_applications: [:logger],
+      mod: {Fusion.Application, []}
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/helpers"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp deps do
+    []
   end
 end

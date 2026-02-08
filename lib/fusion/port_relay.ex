@@ -1,123 +1,111 @@
 defmodule Fusion.PortRelay do
-  @moduledoc """
-  A GenServer for making a connection between two different ports udp/tcp. Using socat.
-  """
+  @moduledoc "GenServer for bridging between UDP/TCP ports using socat."
 
   use GenServer
-	require Logger
+  require Logger
 
-  alias Fusion.PortRelay
   alias Fusion.Utilities.Socat
   alias Fusion.Utilities.Exec
   alias Fusion.Utilities.Ssh
   alias Fusion.Utilities.Bash
 
   defstruct status: :off,
-    from_port: nil,
-    from_type: nil,
-    to_port: nil,
-    to_type: nil,
-    relay_pid: nil,
-    auth: nil,
-    remote: nil,
-    location: nil
+            from_port: nil,
+            from_type: nil,
+            to_port: nil,
+            to_type: nil,
+            relay_port: nil,
+            os_pid: nil,
+            auth: nil,
+            remote: nil,
+            location: nil
+
+  ## Public API
 
   def start_link(from_port, from_type, to_port, to_type) do
-    GenServer.start_link(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type], [])
+    GenServer.start_link(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type])
   end
 
   def start_link(auth, remote, from_port, from_type, to_port, to_type) do
-    GenServer.start_link(__MODULE__, 
-                         [auth, remote, :remote, from_port, from_type, to_port, to_type], [])
+    GenServer.start_link(__MODULE__, [
+      auth,
+      remote,
+      :remote,
+      from_port,
+      from_type,
+      to_port,
+      to_type
+    ])
   end
 
   def start_link_now(from_port, from_type, to_port, to_type) do
     {:ok, server} = res = start_link(from_port, from_type, to_port, to_type)
-    :ok = start_tunnel(server) 
+    :ok = start_tunnel(server)
     res
   end
-  
+
   def start_link_now(auth, remote, from_port, from_type, to_port, to_type) do
     {:ok, server} = res = start_link(auth, remote, from_port, from_type, to_port, to_type)
-    :ok = start_tunnel(server) 
+    :ok = start_tunnel(server)
     res
   end
 
-  def start(from_port, from_type, to_port, to_type) do
-    GenServer.start(__MODULE__, [nil, nil, :local, from_port, from_type, to_port, to_type], [])
-  end
-
-  def start(auth, remote, from_port, from_type, to_port, to_type) do
-    GenServer.start(__MODULE__, [auth, remote, :remote, from_port, from_type, to_port, to_type], [])
-  end
-
-  def start_now(from_port, from_type, to_port, to_type) do
-    {:ok, server} = res = start(from_port, from_type, to_port, to_type)
-    :ok = start_tunnel(server) 
-    res
-  end
-
-  def start_now(auth, remote, from_port, from_type, to_port, to_type) do
-    {:ok, server} = res = start(auth, remote, from_port, from_type, to_port, to_type)
-    :ok = start_tunnel(server) 
-    res
-  end
-  
   def start_tunnel(server) do
-    GenServer.call(server, {:start_tunnel})
+    GenServer.call(server, :start_tunnel)
   end
 
-  ## Server Callbacks
-  
+  ## Callbacks
+
+  @impl true
   def init([auth, remote, location, from_port, from_type, to_port, to_type]) do
-    {:ok, %PortRelay{
-      from_port: from_port,
-      from_type: from_type,
-      to_port: to_port,
-      to_type: to_type,
-      auth: auth,
-      remote: remote,
-      location: location
-    }}
+    {:ok,
+     %__MODULE__{
+       from_port: from_port,
+       from_type: from_type,
+       to_port: to_port,
+       to_type: to_type,
+       auth: auth,
+       remote: remote,
+       location: location
+     }}
   end
 
-  def handle_call({:start_tunnel}, _from, %PortRelay{location: :local} = state) do
-    cmd_str = <<_x :: binary>> = Socat.cmd(
-      state.from_port, state.from_type, state.to_port, state.to_type)
-    {:ok, relay_pid, _os_pid} = cmd_str |> Exec.capture_std_mon
+  @impl true
+  def handle_call(:start_tunnel, _from, %__MODULE__{location: :local} = state) do
+    cmd_str = Socat.cmd(state.from_port, state.from_type, state.to_port, state.to_type)
+    {:ok, port, os_pid} = Exec.capture_std_mon(cmd_str)
 
-    {:reply, :ok, %PortRelay{state | relay_pid: relay_pid }}
+    {:reply, :ok, %{state | relay_port: port, os_pid: os_pid, status: :connected}}
   end
 
-  def handle_call({:start_tunnel}, _from, %PortRelay{location: :remote} = state) do
-    socat_cmd_str = <<_x :: binary>> = Socat.cmd(
-      state.from_port, state.from_type, state.to_port, state.to_type)
+  def handle_call(:start_tunnel, _from, %__MODULE__{location: :remote} = state) do
+    socat_cmd_str = Socat.cmd(state.from_port, state.from_type, state.to_port, state.to_type)
 
-    cmd_str = Ssh.cmd("", state.auth, state.remote) <> " " <> 
-      "\"#{socat_cmd_str |> Bash.escape_str()}\""
+    cmd_str =
+      Ssh.cmd("", state.auth, state.remote) <>
+        " \"#{Bash.escape_str(socat_cmd_str)}\""
 
-    {:ok, relay_pid, _os_pid} = cmd_str |> Exec.capture_std_mon
+    {:ok, port, os_pid} = Exec.capture_std_mon(cmd_str)
 
-    {:reply, :ok, %PortRelay{state | relay_pid: relay_pid }}
+    {:reply, :ok, %{state | relay_port: port, os_pid: os_pid, status: :connected}}
   end
 
-	def handle_info({:stdout, _proc_id, msg}, state) do
-		Logger.debug "stdout"
-		IO.inspect msg
-
-    # todo
+  @impl true
+  def handle_info({port, {:data, _data}}, %{relay_port: port} = state) do
     {:noreply, state}
   end
 
-  def handle_info({:stderr, _proc_id, msg}, state) do
-    cond do
-      true ->
-        {:stop, {:stderr, msg}, state}
-    end
+  def handle_info({port, {:exit_status, _status}}, %{relay_port: port} = state) do
+    {:stop, :relay_exited, state}
   end
 
-  def handle_info({:DOWN, _os_id, :process, _pid, _status}, state) do
-    {:stop, :error_termination_in_exec_process, state}
+  @impl true
+  def terminate(_reason, %{os_pid: os_pid}) when is_integer(os_pid) do
+    System.cmd("kill", [to_string(os_pid)])
+    :ok
+  rescue
+    _ -> :ok
   end
 
+  def terminate(_reason, _state), do: :ok
 end
