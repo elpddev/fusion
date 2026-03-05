@@ -1,14 +1,26 @@
 defmodule Fusion.MixProject do
   use Mix.Project
 
+  @version "0.2.0"
+  @source_url "https://github.com/elpddev/fusion"
+
   def project do
     [
       app: :fusion,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      elixirc_paths: elixirc_paths(Mix.env())
+      elixirc_paths: elixirc_paths(Mix.env()),
+
+      # Hex
+      description: "Remote task runner using Erlang distribution over SSH. Push modules and execute functions on remote machines without pre-installing your application. Zero dependencies.",
+      package: package(),
+      source_url: @source_url,
+
+      # Docs
+      name: "Fusion",
+      docs: docs()
     ]
   end
 
@@ -23,6 +35,25 @@ defmodule Fusion.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
-    []
+    [
+      {:ex_doc, "~> 0.35", only: :dev, runtime: false}
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{"GitHub" => @source_url},
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"],
+      source_ref: "v#{@version}",
+      source_url: @source_url
+    ]
   end
 end
