@@ -7,6 +7,21 @@ on:
     branches: [master]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Erlang and Elixir
+        uses: ./.github/actions/setup-asdf-with-cache
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
   test:
     runs-on: ubuntu-latest
 
