@@ -14,7 +14,8 @@ defmodule Fusion.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
 
       # Hex
-      description: "Remote task runner using Erlang distribution over SSH. Push modules and execute functions on remote machines without pre-installing your application. Zero dependencies.",
+      description:
+        "Remote task runner using Erlang distribution over SSH. Push modules and execute functions on remote machines without pre-installing your application. Zero dependencies.",
       package: package(),
       source_url: @source_url,
 
