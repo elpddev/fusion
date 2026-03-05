@@ -4,6 +4,15 @@ Remote task runner using Erlang distribution over SSH. Zero dependencies.
 
 Fusion connects to remote servers via SSH, sets up port tunnels for Erlang distribution, bootstraps a remote BEAM node, and lets you run Elixir code on it. Think Ansible/Chef but for Elixir - push modules and execute functions on remote machines without pre-installing your application.
 
+[![Hex.pm](https://img.shields.io/hexpm/v/fusion.svg)](https://hex.pm/packages/fusion)
+[![HexDocs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/fusion)
+
+## Articles
+
+- [Running Elixir on Remote Servers with Fusion](https://eyallapid.me/blog/running-elixir-on-remote-servers-with-fusion)
+- [How Fusion Works: Tunnels and Distribution](https://eyallapid.me/blog/how-fusion-works-tunnels-and-distribution)
+- [How Fusion Works: Bytecode Pushing](https://eyallapid.me/blog/how-fusion-works-bytecode-pushing)
+
 ## Requirements
 
 - Elixir ~> 1.18 / OTP 28+
