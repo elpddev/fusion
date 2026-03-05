@@ -17,7 +17,7 @@ Add `fusion` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:fusion, github: "elpddev/fusion"}
+    {:fusion, "~> 0.2.0"}
   ]
 end
 ```
