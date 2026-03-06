@@ -1,4 +1,6 @@
-<img width="100%" height="409" alt="fusion" src="https://github.com/user-attachments/assets/6072982b-ff86-46d7-a5d8-abcc841b2ed3" />
+<p align="center">
+<img width="614" height="409" alt="fusion" src="https://github.com/user-attachments/assets/d4cdbf66-658c-46d0-8f43-99941f18101d" />
+</p>
 
 # Fusion
 
