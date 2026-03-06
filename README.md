@@ -1,3 +1,5 @@
+<img width="100%" height="409" alt="fusion" src="https://github.com/user-attachments/assets/6072982b-ff86-46d7-a5d8-abcc841b2ed3" />
+
 # Fusion
 
 Remote task runner using Erlang distribution over SSH. Zero dependencies.
