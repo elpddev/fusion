@@ -57,29 +57,74 @@ target = %Fusion.Target{
 # Connect (sets up tunnels, bootstraps remote BEAM, joins cluster)
 {:ok, manager} = Fusion.NodeManager.start_link(target)
 {:ok, remote_node} = Fusion.NodeManager.connect(manager)
+```
 
-# Run code remotely (MFA form)
-{:ok, 3} = Fusion.run(remote_node, Kernel, :+, [1, 2])
+Run functions on the remote:
 
-# Run system commands on the remote
+```elixir
+# Get remote system info
+{:ok, version} = Fusion.run(remote_node, System, :version, [])
 {:ok, {hostname, 0}} = Fusion.run(remote_node, System, :cmd, ["hostname", []])
+```
 
-# Push and run your own modules (dependencies are resolved automatically)
-{:ok, result} = Fusion.run(remote_node, MyApp.Worker, :process, [data])
+Run anonymous functions directly:
 
-# Disconnect and clean up
+```elixir
+{:ok, info} = Fusion.run_fun(remote_node, fn ->
+  %{
+    node: Node.self(),
+    otp: System.otp_release(),
+    os: :os.type()
+  }
+end)
+```
+
+Push and run your own modules — dependencies are resolved automatically:
+
+```elixir
+defmodule RemoteHealth do
+  def check do
+    %{
+      hostname: hostname(),
+      elixir_version: System.version(),
+      memory_mb: memory_mb()
+    }
+  end
+
+  defp hostname do
+    {name, _} = System.cmd("hostname", [])
+    String.trim(name)
+  end
+
+  defp memory_mb do
+    {meminfo, _} = System.cmd("cat", ["/proc/meminfo"])
+
+    meminfo
+    |> String.split("\n")
+    |> Enum.find(&String.starts_with?(&1, "MemTotal"))
+    |> String.split(~r/\s+/)
+    |> Enum.at(1)
+    |> String.to_integer()
+    |> div(1024)
+  end
+end
+
+{:ok, health} = Fusion.run(remote_node, RemoteHealth, :check, [])
+# => %{hostname: "web-01", elixir_version: "1.18.4", memory_mb: 7982}
+```
+
+Disconnect when done:
+
+```elixir
 Fusion.NodeManager.disconnect(manager)
 ```
 
 ### Automatic Dependency Resolution
 
-When you run `MyApp.Worker` remotely, Fusion automatically pushes all project modules that `Worker` references (struct usage, function calls, etc.). You don't need to manually track the dependency chain.
+When you run `RemoteHealth` remotely, Fusion reads the BEAM bytecode, walks the dependency tree, and pushes everything the module needs. You don't need to manually track the dependency chain.
 
 ```elixir
-# This pushes MyApp.Worker AND any project modules it depends on
-{:ok, result} = Fusion.run(remote_node, MyApp.Worker, :do_work, [])
-
-# You can also push explicitly
+# You can also push modules explicitly
 Fusion.TaskRunner.push_module(remote_node, MyApp.Worker)
 Fusion.TaskRunner.push_modules(remote_node, [MyApp.Config, MyApp.Utils])
 ```
