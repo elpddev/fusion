@@ -53,6 +53,29 @@ defmodule Fusion.SshKeyProviderTest do
     end
   end
 
+  describe "sign/3" do
+    test "signs data with an Ed25519 key", %{tmp_dir: tmp_dir} do
+      key_path = Path.join(tmp_dir, "sign_ed25519")
+      {_, 0} = System.cmd("ssh-keygen", ["-t", "ed25519", "-f", key_path, "-N", "", "-q"])
+      {:ok, key} = Fusion.SshKeyProvider.user_key(:"ssh-ed25519", key_path: key_path)
+
+      signature = Fusion.SshKeyProvider.sign(key, "test data", [])
+      assert is_binary(signature)
+    end
+
+    test "signs data with an RSA key", %{tmp_dir: tmp_dir} do
+      key_path = Path.join(tmp_dir, "sign_rsa")
+
+      {_, 0} =
+        System.cmd("ssh-keygen", ["-t", "rsa", "-b", "2048", "-f", key_path, "-N", "", "-q"])
+
+      {:ok, key} = Fusion.SshKeyProvider.user_key(:"ssh-rsa", key_path: key_path)
+
+      signature = Fusion.SshKeyProvider.sign(key, "test data", [])
+      assert is_binary(signature)
+    end
+  end
+
   describe "user_key/2 with RSA key" do
     test "reads an RSA key file", %{tmp_dir: tmp_dir} do
       key_path = Path.join(tmp_dir, "test_rsa_key")

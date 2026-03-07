@@ -224,7 +224,7 @@ defmodule Fusion.NodeManager do
     # Try graceful shutdown via RPC first
     if state.remote_node_name do
       try do
-        :rpc.call(state.remote_node_name, System, :halt, [0])
+        :rpc.call(state.remote_node_name, System, :stop, [0])
       catch
         _, _ -> :ok
       end
@@ -236,7 +236,13 @@ defmodule Fusion.NodeManager do
 
     # Close SSH connection
     if state.conn do
-      backend.close(state.conn)
+      try do
+        backend.close(state.conn)
+      rescue
+        _ -> :ok
+      catch
+        _, _ -> :ok
+      end
     end
 
     %{state | status: :disconnected, remote_node_name: nil, conn: nil}

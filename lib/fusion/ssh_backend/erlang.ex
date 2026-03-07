@@ -100,11 +100,11 @@ defmodule Fusion.SshBackend.Erlang do
                 end
 
               :failure ->
-                :ok
+                Logger.warning("SSH exec_async failed: exec returned :failure")
             end
 
-          {:error, _reason} ->
-            :ok
+          {:error, reason} ->
+            Logger.warning("SSH exec_async failed to open channel: #{inspect(reason)}")
         end
       end)
 

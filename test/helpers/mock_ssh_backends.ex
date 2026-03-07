@@ -14,7 +14,7 @@ defmodule Fusion.Test.MockBackend do
   def exec(_c, _cmd), do: {:ok, ""}
 
   @impl true
-  def exec_async(_c, _cmd), do: {:ok, spawn(fn -> Process.sleep(:infinity) end)}
+  def exec_async(_c, _cmd), do: {:ok, spawn(fn -> :ok end)}
 
   @impl true
   def close(_c), do: :ok
@@ -58,7 +58,7 @@ defmodule Fusion.Test.FailTunnelBackend do
   def exec(_c, _cmd), do: {:ok, ""}
 
   @impl true
-  def exec_async(_c, _cmd), do: {:ok, spawn(fn -> Process.sleep(:infinity) end)}
+  def exec_async(_c, _cmd), do: {:ok, spawn(fn -> :ok end)}
 
   @impl true
   def close(_c), do: :ok

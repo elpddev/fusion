@@ -83,7 +83,14 @@ defmodule Fusion.NodeManagerTest do
 
   describe "handle_info(:nodedown)" do
     test "sets status to disconnected and cleans up" do
-      target = %Target{host: "x", port: 22, username: "u", auth: {:key, "/k"}}
+      target = %Target{
+        host: "x",
+        port: 22,
+        username: "u",
+        auth: {:key, "/k"},
+        ssh_backend: Fusion.Test.MockBackend
+      }
+
       {:ok, pid} = NodeManager.start_link(target)
 
       :sys.replace_state(pid, fn state ->
@@ -97,7 +104,14 @@ defmodule Fusion.NodeManagerTest do
     end
 
     test "ignores nodedown for unrelated nodes" do
-      target = %Target{host: "x", port: 22, username: "u", auth: {:key, "/k"}}
+      target = %Target{
+        host: "x",
+        port: 22,
+        username: "u",
+        auth: {:key, "/k"},
+        ssh_backend: Fusion.Test.MockBackend
+      }
+
       {:ok, pid} = NodeManager.start_link(target)
 
       :sys.replace_state(pid, fn state ->
