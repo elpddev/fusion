@@ -3,7 +3,7 @@ defmodule Fusion.NodeManager do
   GenServer that bootstraps and connects a remote BEAM node via SSH.
 
   The NodeManager:
-  1. Uses SSH tunnels (via Connector) to bridge Erlang distribution
+  1. Uses a pluggable SSH backend (via `target.ssh_backend`) for connections and tunnels
   2. Starts a remote Erlang node via SSH with correct EPMD port and cookie
   3. Connects the remote node to the local cluster
   4. Provides lifecycle management (connect/disconnect)
@@ -13,8 +13,6 @@ defmodule Fusion.NodeManager do
   require Logger
 
   alias Fusion.Target
-  alias Fusion.Utilities.Ssh
-  alias Fusion.Utilities.Exec
   alias Fusion.Net
 
   @connect_timeout 15_000
@@ -24,11 +22,8 @@ defmodule Fusion.NodeManager do
   defstruct target: nil,
             status: :disconnected,
             remote_node_name: nil,
-            remote_os_pid: nil,
-            remote_port: nil,
-            epmd_tunnel_port: nil,
-            node_tunnel_port: nil,
-            tunnel_ports: []
+            conn: nil,
+            remote_pid: nil
 
   @type t :: %__MODULE__{}
 
@@ -104,16 +99,14 @@ defmodule Fusion.NodeManager do
 
   @impl true
   def handle_info({port, {:data, _data}}, state) when is_port(port) do
+    # Port data from System backend's OS processes - ignore
     {:noreply, state}
   end
 
   def handle_info({port, {:exit_status, _code}}, state) when is_port(port) do
-    if port in state.tunnel_ports do
-      Logger.warning("Tunnel process exited unexpectedly")
-      {:noreply, %{state | status: :disconnected}}
-    else
-      {:noreply, state}
-    end
+    # Port exit from System backend's OS processes
+    Logger.warning("SSH port process exited unexpectedly")
+    {:noreply, state}
   end
 
   def handle_info({:nodedown, node}, %{remote_node_name: node} = state) do
@@ -137,21 +130,22 @@ defmodule Fusion.NodeManager do
 
   defp do_connect(state) do
     target = state.target
-    {auth, remote} = Target.to_auth_and_spot(target)
+    backend = target.ssh_backend
 
     local_node = ensure_local_node_alive!()
     epmd_port = Net.get_epmd_port()
     remote_node_port = Net.gen_port()
     epmd_tunnel_port = Net.gen_port()
+    remote_node_name = gen_remote_node_name(target.host)
 
-    remote_node_name = gen_remote_node_name(remote.host)
+    Logger.info("Connecting to #{target.host}:#{target.port} as #{target.username}")
 
-    Logger.info("Connecting to #{remote.host}:#{remote.port} as #{target.username}")
-
-    with {:ok, tunnel_ports} <-
-           setup_tunnels(auth, remote, local_node, epmd_port, remote_node_port, epmd_tunnel_port),
-         {:ok, remote_port, remote_os_pid} <-
-           start_remote_node(auth, remote, remote_node_name, epmd_tunnel_port, remote_node_port),
+    with {:ok, conn} <- backend.connect(target),
+         {:ok, _} <- backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
+         {:ok, _} <- backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
+         {:ok, _} <- backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port),
+         cmd = build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port),
+         {:ok, remote_pid} <- backend.exec_async(conn, cmd),
          :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
       Logger.info("Connected to remote node #{remote_node_name}")
       Node.monitor(remote_node_name, true)
@@ -161,59 +155,10 @@ defmodule Fusion.NodeManager do
          state
          | status: :connected,
            remote_node_name: remote_node_name,
-           remote_os_pid: remote_os_pid,
-           remote_port: remote_port,
-           epmd_tunnel_port: epmd_tunnel_port,
-           node_tunnel_port: nil,
-           tunnel_ports: tunnel_ports
+           conn: conn,
+           remote_pid: remote_pid
        }}
     end
-  end
-
-  defp setup_tunnels(auth, remote, local_node, epmd_port, remote_node_port, epmd_tunnel_port) do
-    ports = []
-
-    # Reverse tunnel: make local node's distribution port accessible on remote
-    {:ok, p1, _} =
-      Ssh.cmd_port_tunnel(
-        auth,
-        remote,
-        local_node.port,
-        %Fusion.Net.Spot{host: "localhost", port: local_node.port},
-        :reverse
-      )
-      |> Exec.capture_std_mon()
-
-    # Forward tunnel: make remote node's distribution port accessible locally
-    {:ok, p2, _} =
-      Ssh.cmd_port_tunnel(
-        auth,
-        remote,
-        remote_node_port,
-        %Fusion.Net.Spot{host: "localhost", port: remote_node_port},
-        :forward
-      )
-      |> Exec.capture_std_mon()
-
-    # Reverse tunnel: make local EPMD accessible on remote via tunneled port
-    {:ok, p3, _} =
-      Ssh.cmd_port_tunnel(
-        auth,
-        remote,
-        epmd_tunnel_port,
-        %Fusion.Net.Spot{host: "localhost", port: epmd_port},
-        :reverse
-      )
-      |> Exec.capture_std_mon()
-
-    {:ok, [p1, p2, p3 | ports]}
-  end
-
-  defp start_remote_node(auth, remote, node_name, epmd_port, node_port) do
-    cmd = build_remote_node_cmd(node_name, epmd_port, node_port)
-    remote_cmd = Ssh.cmd_remote(cmd, auth, remote)
-    {:ok, port, os_pid} = Exec.capture_std_mon(remote_cmd)
-    {:ok, port, os_pid}
   end
 
   defp build_remote_node_cmd(node_name, epmd_port, node_port) do
@@ -254,30 +199,27 @@ defmodule Fusion.NodeManager do
   end
 
   defp do_disconnect(state) do
+    backend = state.target.ssh_backend
+
     # Disconnect from the remote node
     if state.remote_node_name do
       Node.disconnect(state.remote_node_name)
     end
 
-    # Kill the remote Elixir process
-    if state.remote_os_pid do
-      kill_remote_process(state)
+    # Clean up via backend
+    if state.conn do
+      try do
+        backend.exec(state.conn, "kill -9 $(pgrep -f 'fusion_worker') 2>/dev/null || true")
+      rescue
+        _ -> :ok
+      catch
+        _, _ -> :ok
+      end
+
+      backend.close(state.conn)
     end
 
-    # Close tunnel ports
-    for port <- state.tunnel_ports, Port.info(port) != nil do
-      Port.close(port)
-    end
-
-    %{state | status: :disconnected, remote_node_name: nil, tunnel_ports: []}
-  end
-
-  defp kill_remote_process(state) do
-    {auth, remote} = Target.to_auth_and_spot(state.target)
-    kill_cmd = "kill #{state.remote_os_pid} 2>/dev/null || true"
-    Ssh.cmd_remote(kill_cmd, auth, remote) |> Exec.run_sync_capture_std()
-  rescue
-    _ -> :ok
+    %{state | status: :disconnected, remote_node_name: nil, conn: nil, remote_pid: nil}
   end
 
   defp ensure_local_node_alive! do

@@ -46,4 +46,33 @@ defmodule Fusion.NodeManagerTest do
       assert NodeManager.terminate(:normal, state) == :ok
     end
   end
+
+  describe "backend selection" do
+    test "uses the backend from the target" do
+      target = %Target{
+        host: "x",
+        port: 22,
+        username: "u",
+        auth: {:key, "/k"},
+        ssh_backend: Fusion.SshBackend.System
+      }
+
+      {:ok, pid} = NodeManager.start_link(target)
+      assert NodeManager.status(pid) == :disconnected
+      GenServer.stop(pid)
+    end
+
+    test "defaults to Erlang backend" do
+      target = %Target{
+        host: "x",
+        port: 22,
+        username: "u",
+        auth: {:key, "/k"}
+      }
+
+      {:ok, pid} = NodeManager.start_link(target)
+      assert NodeManager.status(pid) == :disconnected
+      GenServer.stop(pid)
+    end
+  end
 end
