@@ -5,3 +5,4 @@
 *.beam
 test/docker/.keys/
 .worktrees/
+tmp/
