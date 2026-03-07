@@ -54,8 +54,52 @@ defmodule Fusion.NodeManagerIntegrationTest do
     end
   end
 
-  @tag timeout: 30_000
-  test "connect to localhost, bootstrap remote node, verify cluster connection" do
+  for backend <- [Fusion.SshBackend.Erlang, Fusion.SshBackend.System] do
+    backend_name = backend |> Module.split() |> List.last()
+
+    @tag timeout: 30_000
+    test "connect with #{backend_name} backend" do
+      case skip_unless_ssh_available() do
+        {:skip, reason} ->
+          IO.puts("SKIP: #{reason}")
+
+        {:ok, ssh_key} ->
+          user = System.get_env("USER")
+
+          target = %Target{
+            host: "localhost",
+            port: 22,
+            username: user,
+            auth: {:key, ssh_key},
+            ssh_backend: unquote(backend)
+          }
+
+          {:ok, manager} = NodeManager.start_link(target)
+
+          case NodeManager.connect(manager) do
+            {:ok, remote_node} ->
+              assert is_atom(remote_node)
+              assert remote_node in Node.list()
+              assert NodeManager.status(manager) == :connected
+
+              assert NodeManager.disconnect(manager) == :ok
+              assert NodeManager.status(manager) == :disconnected
+              refute remote_node in Node.list()
+
+            {:error, :local_node_not_alive} ->
+              IO.puts("SKIP: Local node not alive (run with --sname)")
+
+            {:error, reason} ->
+              flunk("Failed with #{unquote(backend_name)}: #{inspect(reason)}")
+          end
+
+          GenServer.stop(manager)
+      end
+    end
+  end
+
+  @tag timeout: 15_000
+  test "Erlang backend: connect and exec on localhost" do
     case skip_unless_ssh_available() do
       {:skip, reason} ->
         IO.puts("SKIP: #{reason}")
@@ -67,29 +111,14 @@ defmodule Fusion.NodeManagerIntegrationTest do
           host: "localhost",
           port: 22,
           username: user,
-          auth: {:key, ssh_key}
+          auth: {:key, ssh_key},
+          ssh_backend: Fusion.SshBackend.Erlang
         }
 
-        {:ok, manager} = NodeManager.start_link(target)
-
-        case NodeManager.connect(manager) do
-          {:ok, remote_node} ->
-            assert is_atom(remote_node)
-            assert remote_node in Node.list()
-            assert NodeManager.status(manager) == :connected
-
-            assert NodeManager.disconnect(manager) == :ok
-            assert NodeManager.status(manager) == :disconnected
-            refute remote_node in Node.list()
-
-          {:error, :local_node_not_alive} ->
-            IO.puts("SKIP: Local node not alive (run with --sname)")
-
-          {:error, reason} ->
-            flunk("Failed to connect: #{inspect(reason)}")
-        end
-
-        GenServer.stop(manager)
+        {:ok, conn} = Fusion.SshBackend.Erlang.connect(target)
+        {:ok, output} = Fusion.SshBackend.Erlang.exec(conn, "echo hello")
+        assert String.trim(output) == "hello"
+        assert Fusion.SshBackend.Erlang.close(conn) == :ok
     end
   end
 end
