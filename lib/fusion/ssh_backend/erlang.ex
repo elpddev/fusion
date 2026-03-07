@@ -6,6 +6,8 @@ defmodule Fusion.SshBackend.Erlang do
   for connections, tunnels, and remote command execution.
   """
 
+  require Logger
+
   @behaviour Fusion.SshBackend
 
   @connect_timeout 15_000
@@ -15,17 +17,31 @@ defmodule Fusion.SshBackend.Erlang do
   def connect(%Fusion.Target{} = target) do
     :ssh.start()
 
+    Logger.debug("SSH connecting to #{target.host}:#{target.port} as #{target.username}")
+
     host = String.to_charlist(target.host)
     opts = connect_opts(target)
 
     case :ssh.connect(host, target.port, opts, @connect_timeout) do
-      {:ok, conn} -> {:ok, conn}
-      {:error, reason} -> {:error, reason}
+      {:ok, conn} ->
+        Logger.debug("SSH connected to #{target.host}:#{target.port}")
+        {:ok, conn}
+
+      {:error, reason} ->
+        Logger.warning(
+          "SSH connection to #{target.host}:#{target.port} failed: #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 
   @impl true
   def forward_tunnel(conn, listen_port, connect_host, connect_port) do
+    Logger.debug(
+      "Creating forward tunnel: localhost:#{listen_port} -> #{connect_host}:#{connect_port}"
+    )
+
     :ssh.tcpip_tunnel_to_server(
       conn,
       ~c"127.0.0.1",
@@ -38,6 +54,10 @@ defmodule Fusion.SshBackend.Erlang do
 
   @impl true
   def reverse_tunnel(conn, listen_port, connect_host, connect_port) do
+    Logger.debug(
+      "Creating reverse tunnel: remote:#{listen_port} -> #{connect_host}:#{connect_port}"
+    )
+
     :ssh.tcpip_tunnel_from_server(
       conn,
       ~c"127.0.0.1",
@@ -52,10 +72,15 @@ defmodule Fusion.SshBackend.Erlang do
   def exec(conn, command) do
     with {:ok, ch} <- :ssh_connection.session_channel(conn, @exec_timeout),
          :success <- :ssh_connection.exec(conn, ch, String.to_charlist(command), @exec_timeout) do
-      collect_output(conn, ch, <<>>, nil)
+      collect_output(conn, ch, <<>>, <<>>, nil)
     else
-      :failure -> {:error, :exec_failed}
-      {:error, reason} -> {:error, reason}
+      :failure ->
+        Logger.warning("SSH exec failed: :exec_failed")
+        {:error, :exec_failed}
+
+      {:error, reason} ->
+        Logger.warning("SSH exec failed: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -89,6 +114,7 @@ defmodule Fusion.SshBackend.Erlang do
   @impl true
   def close(conn) do
     :ssh.close(conn)
+    Logger.debug("SSH connection closed")
     :ok
   end
 
@@ -112,25 +138,25 @@ defmodule Fusion.SshBackend.Erlang do
     base_opts ++ auth_opts
   end
 
-  defp collect_output(conn, ch, stdout, exit_code) do
+  defp collect_output(conn, ch, stdout, stderr, exit_code) do
     receive do
       {:ssh_cm, ^conn, {:data, ^ch, 0, data}} ->
-        collect_output(conn, ch, stdout <> data, exit_code)
+        collect_output(conn, ch, stdout <> data, stderr, exit_code)
 
-      {:ssh_cm, ^conn, {:data, ^ch, 1, _stderr}} ->
-        collect_output(conn, ch, stdout, exit_code)
+      {:ssh_cm, ^conn, {:data, ^ch, 1, data}} ->
+        collect_output(conn, ch, stdout, stderr <> data, exit_code)
 
       {:ssh_cm, ^conn, {:eof, ^ch}} ->
-        collect_output(conn, ch, stdout, exit_code)
+        collect_output(conn, ch, stdout, stderr, exit_code)
 
       {:ssh_cm, ^conn, {:exit_status, ^ch, code}} ->
-        collect_output(conn, ch, stdout, code)
+        collect_output(conn, ch, stdout, stderr, code)
 
       {:ssh_cm, ^conn, {:closed, ^ch}} ->
         case exit_code do
           0 -> {:ok, stdout}
           nil -> {:ok, stdout}
-          code -> {:error, {:exit_code, code, stdout}}
+          code -> {:error, {:exit_code, code, stdout, stderr}}
         end
     after
       @exec_timeout ->
