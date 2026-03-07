@@ -14,6 +14,7 @@ defmodule Fusion.SshBackend.SystemTest do
   end
 
   test "exports all required callback functions" do
+    Code.ensure_loaded!(Backend)
     assert function_exported?(Backend, :connect, 1)
     assert function_exported?(Backend, :forward_tunnel, 4)
     assert function_exported?(Backend, :reverse_tunnel, 4)

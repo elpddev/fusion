@@ -16,11 +16,20 @@ defmodule Fusion.SshBackend.ErlangTest do
     end
 
     test "builds key auth options" do
-      target = %Target{host: "h", port: 22, username: "user", auth: {:key, "/home/user/.ssh/id_ed25519"}}
+      target = %Target{
+        host: "h",
+        port: 22,
+        username: "user",
+        auth: {:key, "/home/user/.ssh/id_ed25519"}
+      }
+
       opts = Backend.connect_opts(target)
 
       assert Keyword.get(opts, :user) == ~c"user"
-      assert Keyword.get(opts, :key_cb) == {Fusion.SshKeyProvider, key_path: "/home/user/.ssh/id_ed25519"}
+
+      assert Keyword.get(opts, :key_cb) ==
+               {Fusion.SshKeyProvider, key_path: "/home/user/.ssh/id_ed25519"}
+
       assert Keyword.get(opts, :silently_accept_hosts) == true
       assert Keyword.get(opts, :user_interaction) == false
       refute Keyword.has_key?(opts, :password)
