@@ -27,7 +27,7 @@ defmodule Fusion.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger, :ssh, :public_key, :crypto],
       mod: {Fusion.Application, []}
     ]
   end
