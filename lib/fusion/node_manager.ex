@@ -140,24 +140,41 @@ defmodule Fusion.NodeManager do
 
     Logger.info("Connecting to #{target.host}:#{target.port} as #{target.username}")
 
-    with {:ok, conn} <- backend.connect(target),
-         {:ok, _} <- backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
-         {:ok, _} <- backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
-         {:ok, _} <- backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port),
-         cmd = build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port),
-         {:ok, remote_pid} <- backend.exec_async(conn, cmd),
-         :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
-      Logger.info("Connected to remote node #{remote_node_name}")
-      Node.monitor(remote_node_name, true)
+    case backend.connect(target) do
+      {:ok, conn} ->
+        result =
+          with {:ok, _} <-
+                 backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
+               {:ok, _} <-
+                 backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
+               {:ok, _} <- backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port),
+               cmd = build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port),
+               {:ok, remote_pid} <- backend.exec_async(conn, cmd),
+               :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
+            Logger.info("Connected to remote node #{remote_node_name}")
+            Node.monitor(remote_node_name, true)
 
-      {:ok,
-       %{
-         state
-         | status: :connected,
-           remote_node_name: remote_node_name,
-           conn: conn,
-           remote_pid: remote_pid
-       }}
+            {:ok,
+             %{
+               state
+               | status: :connected,
+                 remote_node_name: remote_node_name,
+                 conn: conn,
+                 remote_pid: remote_pid
+             }}
+          end
+
+        case result do
+          {:ok, _} = success ->
+            success
+
+          {:error, _} = error ->
+            backend.close(conn)
+            error
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -209,7 +226,10 @@ defmodule Fusion.NodeManager do
     # Clean up via backend
     if state.conn do
       try do
-        backend.exec(state.conn, "kill -9 $(pgrep -f 'fusion_worker') 2>/dev/null || true")
+        backend.exec(
+          state.conn,
+          "kill -9 $(pgrep -f '#{state.remote_node_name}') 2>/dev/null || true"
+        )
       rescue
         _ -> :ok
       catch

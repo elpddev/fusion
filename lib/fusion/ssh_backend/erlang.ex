@@ -40,7 +40,7 @@ defmodule Fusion.SshBackend.Erlang do
   def reverse_tunnel(conn, listen_port, connect_host, connect_port) do
     :ssh.tcpip_tunnel_from_server(
       conn,
-      ~c"0.0.0.0",
+      ~c"127.0.0.1",
       listen_port,
       String.to_charlist(connect_host),
       connect_port,
@@ -63,14 +63,20 @@ defmodule Fusion.SshBackend.Erlang do
   def exec_async(conn, command) do
     pid =
       spawn_link(fn ->
-        {:ok, ch} = :ssh_connection.session_channel(conn, @exec_timeout)
-        :success = :ssh_connection.exec(conn, ch, String.to_charlist(command), @exec_timeout)
+        case :ssh_connection.session_channel(conn, @exec_timeout) do
+          {:ok, ch} ->
+            case :ssh_connection.exec(conn, ch, String.to_charlist(command), @exec_timeout) do
+              :success ->
+                receive do
+                  {:ssh_cm, ^conn, {:closed, ^ch}} -> :ok
+                end
 
-        # Keep the process alive to receive SSH messages
-        receive do
-          {:ssh_cm, ^conn, {:closed, ^ch}} -> :ok
-        after
-          :infinity -> :ok
+              :failure ->
+                exit({:exec_failed, command})
+            end
+
+          {:error, reason} ->
+            exit({:session_channel_failed, reason})
         end
       end)
 
