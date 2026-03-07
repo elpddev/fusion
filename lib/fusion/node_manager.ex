@@ -22,8 +22,7 @@ defmodule Fusion.NodeManager do
   defstruct target: nil,
             status: :disconnected,
             remote_node_name: nil,
-            conn: nil,
-            remote_pid: nil
+            conn: nil
 
   @type t :: %__MODULE__{}
 
@@ -100,7 +99,8 @@ defmodule Fusion.NodeManager do
   @impl true
   def handle_info({:nodedown, node}, %{remote_node_name: node} = state) do
     Logger.warning("Remote node #{node} went down")
-    {:noreply, %{state | status: :disconnected}}
+    new_state = do_disconnect(state)
+    {:noreply, new_state}
   end
 
   def handle_info(_msg, state) do
@@ -121,49 +121,63 @@ defmodule Fusion.NodeManager do
     target = state.target
     backend = target.ssh_backend
 
-    local_node = ensure_local_node_alive!()
-    epmd_port = Net.get_epmd_port()
-    remote_node_port = Net.gen_port()
-    epmd_tunnel_port = Net.gen_port()
-    remote_node_name = gen_remote_node_name(target.host)
+    with {:ok, local_node} <- ensure_local_node_alive() do
+      epmd_port = Net.get_epmd_port()
+      remote_node_port = Net.gen_port()
+      epmd_tunnel_port = Net.gen_port()
+      remote_node_name = gen_remote_node_name(target.host)
 
-    Logger.info("Connecting to #{target.host}:#{target.port} as #{target.username}")
+      Logger.info("Connecting to #{target.host}:#{target.port} as #{target.username}")
 
-    case backend.connect(target) do
-      {:ok, conn} ->
-        result =
-          with {:ok, _} <-
-                 backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
-               {:ok, _} <-
-                 backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
-               {:ok, _} <- backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port),
-               cmd = build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port),
-               {:ok, remote_pid} <- backend.exec_async(conn, cmd),
-               :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
-            Logger.info("Connected to remote node #{remote_node_name}")
-            Node.monitor(remote_node_name, true)
+      case backend.connect(target) do
+        {:ok, conn} ->
+          result =
+            with {:ok, _} <-
+                   backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
+                 {:ok, _} <-
+                   backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
+                 {:ok, _} <-
+                   backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port),
+                 cmd =
+                   build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port),
+                 {:ok, _} <- backend.exec_async(conn, cmd),
+                 :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
+              Logger.info("Connected to remote node #{remote_node_name}")
+              Node.monitor(remote_node_name, true)
 
-            {:ok,
-             %{
-               state
-               | status: :connected,
-                 remote_node_name: remote_node_name,
-                 conn: conn,
-                 remote_pid: remote_pid
-             }}
+              {:ok,
+               %{
+                 state
+                 | status: :connected,
+                   remote_node_name: remote_node_name,
+                   conn: conn
+               }}
+            end
+
+          case result do
+            {:ok, _} = success ->
+              success
+
+            {:error, _} = error ->
+              # Try to kill orphaned remote process before closing
+              try do
+                backend.exec(
+                  conn,
+                  "kill -9 $(pgrep -f '#{remote_node_name}') 2>/dev/null || true"
+                )
+              rescue
+                _ -> :ok
+              catch
+                _, _ -> :ok
+              end
+
+              backend.close(conn)
+              error
           end
 
-        case result do
-          {:ok, _} = success ->
-            success
-
-          {:error, _} = error ->
-            backend.close(conn)
-            error
-        end
-
-      {:error, _} = error ->
-        error
+        {:error, _} = error ->
+          error
+      end
     end
   end
 
@@ -207,36 +221,33 @@ defmodule Fusion.NodeManager do
   defp do_disconnect(state) do
     backend = state.target.ssh_backend
 
-    # Disconnect from the remote node
+    # Try graceful shutdown via RPC first
     if state.remote_node_name do
-      Node.disconnect(state.remote_node_name)
-    end
-
-    # Clean up via backend
-    if state.conn do
       try do
-        backend.exec(
-          state.conn,
-          "kill -9 $(pgrep -f '#{state.remote_node_name}') 2>/dev/null || true"
-        )
-      rescue
-        _ -> :ok
+        :rpc.call(state.remote_node_name, System, :halt, [0])
       catch
         _, _ -> :ok
       end
 
+      # Small delay for graceful shutdown
+      Process.sleep(100)
+      Node.disconnect(state.remote_node_name)
+    end
+
+    # Close SSH connection
+    if state.conn do
       backend.close(state.conn)
     end
 
-    %{state | status: :disconnected, remote_node_name: nil, conn: nil, remote_pid: nil}
+    %{state | status: :disconnected, remote_node_name: nil, conn: nil}
   end
 
-  defp ensure_local_node_alive! do
-    unless Node.alive?() do
-      raise "Local node must be alive (started with --sname or --name) to use Fusion"
+  defp ensure_local_node_alive do
+    if Node.alive?() do
+      {:ok, Net.get_erl_node()}
+    else
+      {:error, :local_node_not_alive}
     end
-
-    Net.get_erl_node()
   end
 
   defp gen_remote_node_name(_host) do
