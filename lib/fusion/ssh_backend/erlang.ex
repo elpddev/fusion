@@ -62,21 +62,24 @@ defmodule Fusion.SshBackend.Erlang do
   @impl true
   def exec_async(conn, command) do
     pid =
-      spawn_link(fn ->
+      spawn(fn ->
         case :ssh_connection.session_channel(conn, @exec_timeout) do
           {:ok, ch} ->
             case :ssh_connection.exec(conn, ch, String.to_charlist(command), @exec_timeout) do
               :success ->
+                ref = Process.monitor(conn)
+
                 receive do
                   {:ssh_cm, ^conn, {:closed, ^ch}} -> :ok
+                  {:DOWN, ^ref, :process, ^conn, _reason} -> :ok
                 end
 
               :failure ->
-                exit({:exec_failed, command})
+                :ok
             end
 
-          {:error, reason} ->
-            exit({:session_channel_failed, reason})
+          {:error, _reason} ->
+            :ok
         end
       end)
 

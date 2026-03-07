@@ -98,17 +98,6 @@ defmodule Fusion.NodeManager do
   end
 
   @impl true
-  def handle_info({port, {:data, _data}}, state) when is_port(port) do
-    # Port data from System backend's OS processes - ignore
-    {:noreply, state}
-  end
-
-  def handle_info({port, {:exit_status, _code}}, state) when is_port(port) do
-    # Port exit from System backend's OS processes
-    Logger.warning("SSH port process exited unexpectedly")
-    {:noreply, state}
-  end
-
   def handle_info({:nodedown, node}, %{remote_node_name: node} = state) do
     Logger.warning("Remote node #{node} went down")
     {:noreply, %{state | status: :disconnected}}

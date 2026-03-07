@@ -65,9 +65,25 @@ defmodule Fusion.SshBackend.System do
   def exec_async(%Conn{} = conn, command) do
     cmd = Ssh.cmd_remote(command, conn.auth, conn.remote)
 
-    case Exec.capture_std_mon(cmd) do
-      {:ok, port, _os_pid} -> {:ok, port}
-      error -> error
+    pid =
+      spawn(fn ->
+        port =
+          Port.open({:spawn, cmd}, [
+            :binary,
+            :exit_status,
+            :stderr_to_stdout
+          ])
+
+        drain_port(port)
+      end)
+
+    {:ok, pid}
+  end
+
+  defp drain_port(port) do
+    receive do
+      {^port, {:data, _data}} -> drain_port(port)
+      {^port, {:exit_status, _code}} -> :ok
     end
   end
 
