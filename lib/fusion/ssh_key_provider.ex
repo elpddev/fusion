@@ -44,7 +44,20 @@ defmodule Fusion.SshKeyProvider do
 
   @impl true
   def sign(key, data, _opts) do
-    :public_key.sign(data, :none, key)
+    hash = hash_for_key(key)
+    :public_key.sign(data, hash, key)
+  end
+
+  defp hash_for_key(key) do
+    case key do
+      # Ed25519/Ed448 — EdDSA does its own hashing
+      {:ed_pri, _, _, _} -> :none
+      {:ed_pub, _, _} -> :none
+      # ECDSA
+      {:ECPrivateKey, _, _, _, _} -> :sha256
+      # RSA — use sha256 for rsa-sha2-256 (modern default)
+      _ -> :sha256
+    end
   end
 
   defp decode_private_key(data) do

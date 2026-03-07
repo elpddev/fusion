@@ -24,8 +24,8 @@ defmodule Fusion.SshBackend do
   @doc "Execute a command on the remote host synchronously. Returns stdout."
   @callback exec(conn(), String.t()) :: {:ok, String.t()} | {:error, term()}
 
-  @doc "Execute a command on the remote host asynchronously. Returns port/pid for monitoring."
-  @callback exec_async(conn(), String.t()) :: {:ok, pid()} | {:error, term()}
+  @doc "Execute a command on the remote host asynchronously. Returns an opaque process reference."
+  @callback exec_async(conn(), String.t()) :: {:ok, term()} | {:error, term()}
 
   @doc "Close the SSH connection."
   @callback close(conn()) :: :ok

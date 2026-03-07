@@ -89,6 +89,9 @@ defmodule Fusion.SshBackend.System do
 
   @impl true
   def close(%Conn{} = _conn) do
+    # System backend tunnel ports are owned by the calling process
+    # and will be cleaned up when that process terminates.
+    # The Erlang runtime automatically closes ports owned by a dying process.
     :ok
   end
 end
