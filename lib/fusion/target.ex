@@ -1,7 +1,7 @@
 defmodule Fusion.Target do
   @moduledoc "Represents an SSH connection target."
 
-  defstruct host: nil, port: 22, username: nil, auth: nil
+  defstruct host: nil, port: 22, username: nil, auth: nil, ssh_backend: Fusion.SshBackend.Erlang
 
   @type auth :: {:key, String.t()} | {:password, String.t()}
 
@@ -9,7 +9,8 @@ defmodule Fusion.Target do
           host: String.t(),
           port: non_neg_integer(),
           username: String.t(),
-          auth: auth()
+          auth: auth(),
+          ssh_backend: module()
         }
 
   @doc """
