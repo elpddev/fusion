@@ -17,6 +17,8 @@ defmodule Fusion.NodeManager do
 
   @connect_timeout 15_000
   @connect_retry_interval 500
+  @tunnel_retry_attempts 5
+  @tunnel_retry_interval 200
   @default_elixir_path "/usr/bin/env elixir"
   @tunnel_connect_host "127.0.0.1"
 
@@ -183,7 +185,9 @@ defmodule Fusion.NodeManager do
 
   defp setup_tunnels(backend, conn, local_node, ports) do
     with {:ok, _} <-
-           backend.reverse_tunnel(conn, local_node.port, @tunnel_connect_host, local_node.port),
+           retry_tunnel(fn ->
+             backend.reverse_tunnel(conn, local_node.port, @tunnel_connect_host, local_node.port)
+           end),
          {:ok, _} <-
            backend.forward_tunnel(
              conn,
@@ -192,8 +196,27 @@ defmodule Fusion.NodeManager do
              ports.remote_node
            ),
          {:ok, _} <-
-           backend.reverse_tunnel(conn, ports.epmd_tunnel, @tunnel_connect_host, ports.epmd) do
+           retry_tunnel(fn ->
+             backend.reverse_tunnel(conn, ports.epmd_tunnel, @tunnel_connect_host, ports.epmd)
+           end) do
       :ok
+    end
+  end
+
+  # Retry tunnel setup to handle transient :not_accepted errors that occur when
+  # a previous SSH connection's tunnel listener hasn't been fully released yet.
+  defp retry_tunnel(fun, attempt \\ 1) do
+    case fun.() do
+      {:ok, _} = ok ->
+        ok
+
+      {:error, :not_accepted} when attempt < @tunnel_retry_attempts ->
+        Logger.debug("Tunnel not accepted, retrying (#{attempt}/#{@tunnel_retry_attempts})")
+        Process.sleep(@tunnel_retry_interval)
+        retry_tunnel(fun, attempt + 1)
+
+      error ->
+        error
     end
   end
 

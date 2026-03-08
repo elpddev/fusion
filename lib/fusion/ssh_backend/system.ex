@@ -143,7 +143,7 @@ defmodule Fusion.SshBackend.System do
         _, _ -> :ok
       end
 
-      System.cmd("kill", [to_string(os_pid)], stderr_to_stdout: true)
+      System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
     end
 
     Agent.stop(tracker)
