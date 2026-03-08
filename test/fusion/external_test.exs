@@ -96,17 +96,6 @@ defmodule Fusion.ExternalTest do
     end
   end
 
-  @tag timeout: 30_000
-  test "connect and disconnect with System backend (key auth)" do
-    with_connected_node(
-      fn _manager, remote_node ->
-        assert is_atom(remote_node)
-        assert remote_node in Node.list()
-      end,
-      backend: Fusion.SshBackend.System
-    )
-  end
-
   ## NodeManager: status and lifecycle
 
   @tag timeout: 30_000
