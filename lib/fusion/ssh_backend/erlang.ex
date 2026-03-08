@@ -21,13 +21,14 @@ defmodule Fusion.SshBackend.Erlang do
   @localhost_bind ~c"127.0.0.1"
   @connect_timeout 15_000
   @tunnel_timeout 15_000
+  # Idle timeout: resets on each received message, not a wall-clock limit
   @exec_timeout 30_000
   @exec_async_timeout 300_000
+  @idle_timeout 120_000
+  @max_output_bytes 10_485_760
 
   @impl true
   def connect(%Fusion.Target{} = target) do
-    :ssh.start()
-
     Logger.debug("SSH connecting to #{target.host}:#{target.port} as #{target.username}")
 
     host = String.to_charlist(target.host)
@@ -149,7 +150,8 @@ defmodule Fusion.SshBackend.Erlang do
     base_opts = [
       user: String.to_charlist(target.username),
       silently_accept_hosts: true,
-      user_interaction: false
+      user_interaction: false,
+      idle_time: @idle_timeout
     ]
 
     auth_opts =
@@ -165,6 +167,16 @@ defmodule Fusion.SshBackend.Erlang do
   end
 
   defp collect_output(conn, ch, stdout, stderr, exit_code) do
+    if byte_size(stdout) + byte_size(stderr) > @max_output_bytes do
+      Logger.warning("SSH exec output exceeded #{@max_output_bytes} bytes, closing channel")
+      :ssh_connection.close(conn, ch)
+      {:error, :output_exceeded_limit}
+    else
+      do_collect_output(conn, ch, stdout, stderr, exit_code)
+    end
+  end
+
+  defp do_collect_output(conn, ch, stdout, stderr, exit_code) do
     receive do
       {:ssh_cm, ^conn, {:data, ^ch, 0, data}} ->
         collect_output(conn, ch, stdout <> data, stderr, exit_code)
@@ -184,7 +196,7 @@ defmodule Fusion.SshBackend.Erlang do
           # Some SSH servers close the channel without sending exit_status.
           # Treat this as success since we received all the output.
           nil -> {:ok, stdout}
-          code -> {:error, {:exit_code, code, stdout, stderr}}
+          code -> {:error, {:exit_status, code, stdout, stderr}}
         end
     after
       @exec_timeout ->

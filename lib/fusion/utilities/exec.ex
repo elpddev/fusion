@@ -9,12 +9,17 @@ defmodule Fusion.Utilities.Exec do
   - `{port, {:data, data}}` for stdout output
   - `{port, {:exit_status, status}}` when the process exits
   """
-  def capture_std_mon(cmd) do
+  def capture_std_mon(cmd, opts \\ []) do
+    env = Keyword.get(opts, :env, [])
+    port_env = Enum.map(env, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+
     port =
-      Port.open({:spawn, cmd}, [
+      Port.open({:spawn_executable, "/bin/sh"}, [
         :binary,
         :exit_status,
-        :stderr_to_stdout
+        :stderr_to_stdout,
+        {:args, ["-c", cmd]},
+        {:env, port_env}
       ])
 
     {:os_pid, os_pid} = Port.info(port, :os_pid)
@@ -25,8 +30,10 @@ defmodule Fusion.Utilities.Exec do
   Runs a command synchronously and captures output.
   Returns `{:ok, output}` or `{:error, {exit_code, output}}`.
   """
-  def run_sync_capture_std(cmd) do
-    case System.cmd("/bin/sh", ["-c", cmd], stderr_to_stdout: true) do
+  def run_sync_capture_std(cmd, opts \\ []) do
+    env = Keyword.get(opts, :env, [])
+
+    case System.cmd("/bin/sh", ["-c", cmd], stderr_to_stdout: true, env: env) do
       {output, 0} -> {:ok, output}
       {output, code} -> {:error, {code, output}}
     end

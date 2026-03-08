@@ -18,15 +18,43 @@ defmodule Fusion.SshBackend.System do
 
   defmodule Conn do
     @moduledoc false
-    defstruct auth: nil, remote: nil
+    @enforce_keys [:auth, :remote]
+    defstruct [:auth, :remote]
+
+    defimpl Inspect do
+      def inspect(%{auth: auth, remote: remote}, opts) do
+        redacted_auth =
+          case auth do
+            %{password: _} = a -> %{a | password: "**REDACTED**"}
+            other -> other
+          end
+
+        Inspect.Algebra.concat([
+          "#Fusion.SshBackend.System.Conn<",
+          Inspect.Algebra.to_doc(%{auth: redacted_auth, remote: remote}, opts),
+          ">"
+        ])
+      end
+    end
   end
 
   # Note: unlike the Erlang backend, connect/1 does not establish a TCP connection.
   # Connection validation is deferred until the first tunnel or exec call.
   @impl true
   def connect(%Fusion.Target{} = target) do
-    {auth, remote} = Fusion.Target.to_auth_and_spot(target)
+    {auth, remote} = to_auth_and_spot(target)
     {:ok, %Conn{auth: auth, remote: remote}}
+  end
+
+  defp to_auth_and_spot(%Fusion.Target{} = target) do
+    auth =
+      case target.auth do
+        {:key, path} -> %{username: target.username, key_path: path}
+        {:password, pass} -> %{username: target.username, password: pass}
+      end
+
+    remote = %Spot{host: target.host, port: target.port}
+    {auth, remote}
   end
 
   @impl true
@@ -43,7 +71,7 @@ defmodule Fusion.SshBackend.System do
     to_spot = %Spot{host: connect_host, port: connect_port}
     cmd = Ssh.cmd_port_tunnel(conn.auth, conn.remote, listen_port, to_spot, direction)
 
-    case Exec.capture_std_mon(cmd) do
+    case Exec.capture_std_mon(cmd, env: password_env(conn.auth)) do
       {:ok, _port, _os_pid} ->
         {:ok, listen_port}
 
@@ -55,20 +83,31 @@ defmodule Fusion.SshBackend.System do
   @impl true
   def exec(%Conn{} = conn, command) do
     cmd = Ssh.cmd_remote(command, conn.auth, conn.remote)
-    Exec.run_sync_capture_std(cmd)
+
+    case Exec.run_sync_capture_std(cmd, env: password_env(conn.auth)) do
+      {:ok, output} -> {:ok, output}
+      {:error, {code, output}} -> {:error, {:exit_status, code, output, ""}}
+    end
   end
 
   @impl true
   def exec_async(%Conn{} = conn, command) do
     cmd = Ssh.cmd_remote(command, conn.auth, conn.remote)
 
+    port_env =
+      Enum.map(password_env(conn.auth), fn {k, v} ->
+        {String.to_charlist(k), String.to_charlist(v)}
+      end)
+
     pid =
       spawn(fn ->
         port =
-          Port.open({:spawn, cmd}, [
+          Port.open({:spawn_executable, "/bin/sh"}, [
             :binary,
             :exit_status,
-            :stderr_to_stdout
+            :stderr_to_stdout,
+            {:args, ["-c", cmd]},
+            {:env, port_env}
           ])
 
         drain_port(port)
@@ -83,9 +122,13 @@ defmodule Fusion.SshBackend.System do
       {^port, {:exit_status, _code}} -> :ok
     after
       @drain_timeout ->
+        Port.close(port)
         Logger.warning("System exec_async drain_port timed out after #{@drain_timeout}ms")
     end
   end
+
+  defp password_env(%{password: password}), do: [{"SSHPASS", password}]
+  defp password_env(_auth), do: []
 
   @impl true
   def close(%Conn{} = _conn) do

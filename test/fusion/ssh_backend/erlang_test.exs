@@ -11,4 +11,8 @@ defmodule Fusion.SshBackend.ErlangTest do
     started_apps = Application.started_applications() |> Enum.map(&elem(&1, 0))
     assert :ssh in started_apps
   end
+
+  test "close/1 returns :ok even with invalid connection" do
+    assert :ok = Backend.close(:not_a_real_connection)
+  end
 end

@@ -18,13 +18,19 @@ defmodule Fusion.NodeManager do
   @connect_timeout 15_000
   @connect_retry_interval 500
   @default_elixir_path "/usr/bin/env elixir"
+  @tunnel_connect_host "127.0.0.1"
 
   defstruct target: nil,
             status: :disconnected,
             remote_node_name: nil,
             conn: nil
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          target: Target.t() | nil,
+          status: :disconnected | :connected,
+          remote_node_name: atom() | nil,
+          conn: term() | nil
+        }
 
   ## Public API
 
@@ -44,7 +50,7 @@ defmodule Fusion.NodeManager do
 
   @doc "Disconnect from the remote node and clean up."
   def disconnect(server) do
-    GenServer.call(server, :disconnect)
+    GenServer.call(server, :disconnect, 60_000)
   end
 
   @doc "Get the remote node name (atom) if connected."
@@ -61,6 +67,16 @@ defmodule Fusion.NodeManager do
 
   @impl true
   def init(%Target{} = target) do
+    backend = target.ssh_backend
+
+    unless Code.ensure_loaded?(backend) and
+             Enum.all?(Fusion.SshBackend.behaviour_info(:callbacks), fn {fun, arity} ->
+               function_exported?(backend, fun, arity)
+             end) do
+      raise ArgumentError,
+            "#{inspect(backend)} does not implement the Fusion.SshBackend behaviour"
+    end
+
     {:ok, %__MODULE__{target: target}}
   end
 
@@ -102,7 +118,7 @@ defmodule Fusion.NodeManager do
   end
 
   @impl true
-  def handle_info({:nodedown, node}, %{remote_node_name: node} = state) do
+  def handle_info({:nodedown, node}, %{remote_node_name: node, status: :connected} = state) do
     Logger.warning("Remote node #{node} went down")
     new_state = do_disconnect(state)
     {:noreply, new_state}
@@ -129,77 +145,60 @@ defmodule Fusion.NodeManager do
     backend = target.ssh_backend
 
     with {:ok, local_node} <- ensure_local_node_alive() do
-      epmd_port = Net.get_epmd_port()
-      remote_node_port = Net.gen_port()
-      epmd_tunnel_port = Net.gen_port()
+      [remote_node_port, epmd_tunnel_port] = Net.gen_unique_ports(2)
+
+      ports = %{
+        epmd: Net.get_epmd_port(),
+        remote_node: remote_node_port,
+        epmd_tunnel: epmd_tunnel_port
+      }
+
       remote_node_name = gen_remote_node_name(target.host)
 
       Logger.info("Connecting to #{target.host}:#{target.port} as #{target.username}")
 
-      case backend.connect(target) do
-        {:ok, conn} ->
-          result =
-            with :ok <-
-                   setup_tunnels(
-                     backend,
-                     conn,
-                     local_node,
-                     remote_node_port,
-                     epmd_tunnel_port,
-                     epmd_port
-                   ),
-                 :ok <-
-                   launch_remote_node(
-                     backend,
-                     conn,
-                     remote_node_name,
-                     epmd_tunnel_port,
-                     remote_node_port
-                   ),
-                 :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
-              Logger.info("Connected to remote node #{remote_node_name}")
-              Node.monitor(remote_node_name, true)
+      with {:ok, conn} <- backend.connect(target) do
+        case do_connect_with_conn(state, backend, conn, local_node, remote_node_name, ports) do
+          {:ok, _} = success ->
+            success
 
-              {:ok,
-               %{
-                 state
-                 | status: :connected,
-                   remote_node_name: remote_node_name,
-                   conn: conn
-               }}
-            end
-
-          case result do
-            {:ok, _} = success ->
-              success
-
-            {:error, _} = error ->
-              cleanup_failed_connect(backend, conn, remote_node_name)
-              error
-          end
-
-        {:error, _} = error ->
-          error
+          {:error, _} = error ->
+            cleanup_failed_connect(backend, conn, remote_node_name)
+            error
+        end
       end
     end
   end
 
-  # The "localhost" here is the connect_host passed to the backend's tunnel functions.
-  # The Erlang backend binds the tunnel listener on 127.0.0.1 (numeric, no DNS lookup).
-  # "localhost" is used as the connect_host which resolves to 127.0.0.1 on the remote side.
-  defp setup_tunnels(backend, conn, local_node, remote_node_port, epmd_tunnel_port, epmd_port) do
+  defp do_connect_with_conn(state, backend, conn, local_node, remote_node_name, ports) do
+    with :ok <- setup_tunnels(backend, conn, local_node, ports),
+         :ok <- launch_remote_node(backend, conn, remote_node_name, ports),
+         :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
+      Logger.info("Connected to remote node #{remote_node_name}")
+      Node.monitor(remote_node_name, true)
+
+      {:ok, %{state | status: :connected, remote_node_name: remote_node_name, conn: conn}}
+    end
+  end
+
+  defp setup_tunnels(backend, conn, local_node, ports) do
     with {:ok, _} <-
-           backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
+           backend.reverse_tunnel(conn, local_node.port, @tunnel_connect_host, local_node.port),
          {:ok, _} <-
-           backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
+           backend.forward_tunnel(
+             conn,
+             ports.remote_node,
+             @tunnel_connect_host,
+             ports.remote_node
+           ),
          {:ok, _} <-
-           backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port) do
+           backend.reverse_tunnel(conn, ports.epmd_tunnel, @tunnel_connect_host, ports.epmd) do
       :ok
     end
   end
 
-  defp launch_remote_node(backend, conn, remote_node_name, epmd_tunnel_port, remote_node_port) do
-    cmd = build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port)
+  defp launch_remote_node(backend, conn, remote_node_name, ports) do
+    cmd = build_remote_node_cmd(remote_node_name, ports.epmd_tunnel, ports.remote_node)
 
     case backend.exec_async(conn, cmd) do
       {:ok, _} -> :ok
@@ -219,7 +218,7 @@ defmodule Fusion.NodeManager do
     safe_call(fn ->
       backend.exec(
         conn,
-        "kill -9 $(pgrep -f '#{remote_node_name}') 2>/dev/null || true"
+        "kill -9 $(pgrep -f -- '--sname #{remote_node_name}') 2>/dev/null || true"
       )
     end)
   end
@@ -228,15 +227,25 @@ defmodule Fusion.NodeManager do
     try do
       fun.()
     rescue
-      _ -> :ok
+      e ->
+        Logger.debug("Cleanup call failed: #{inspect(e)}")
+        :ok
     catch
-      _, _ -> :ok
+      _, reason ->
+        Logger.debug("Cleanup call failed: #{inspect(reason)}")
+        :ok
     end
   end
 
+  # Extension point: if you need alternate remote node types (e.g., rebar3-based
+  # Erlang nodes), this is the function to replace.
+  #
   # All values interpolated into this command (cookie, node_name, ports) come
   # from trusted internal sources — cookie from Node.get_cookie(), node_name
   # from gen_remote_node_name/1, and ports from Net.gen_port/0.
+  #
+  # Note: the cookie is visible via `ps aux` on the remote host. For multi-tenant
+  # environments, consider using ~/.erlang.cookie instead.
   defp build_remote_node_cmd(node_name, epmd_port, node_port) do
     cookie = Node.get_cookie()
 
@@ -244,7 +253,7 @@ defmodule Fusion.NodeManager do
       "ERL_EPMD_PORT=#{epmd_port}",
       @default_elixir_path,
       "--sname #{node_name}",
-      "--cookie #{cookie}",
+      "--cookie '#{cookie}'",
       "--erl \"-kernel inet_dist_listen_min #{node_port} inet_dist_listen_max #{node_port}\"",
       "-e \"Process.sleep(:infinity)\""
     ]
@@ -278,12 +287,15 @@ defmodule Fusion.NodeManager do
     backend = state.target.ssh_backend
 
     if state.remote_node_name do
+      # Stop monitoring before teardown to prevent :nodedown re-entering do_disconnect
+      safe_call(fn -> Node.monitor(state.remote_node_name, false) end)
+
       # Request graceful shutdown via async RPC (cast won't block if remote is hung)
       safe_call(fn -> :rpc.cast(state.remote_node_name, System, :stop, [0]) end)
-      Node.disconnect(state.remote_node_name)
+      safe_call(fn -> Node.disconnect(state.remote_node_name) end)
 
-      # If RPC couldn't reach the node (e.g., distribution already broken),
-      # fall back to killing the remote process via SSH.
+      # Belt-and-suspenders: always kill via SSH as well, since rpc.cast is
+      # fire-and-forget and we cannot know if the graceful shutdown succeeded.
       if state.conn do
         kill_remote_process(backend, state.conn, state.remote_node_name)
       end
@@ -299,16 +311,18 @@ defmodule Fusion.NodeManager do
 
   defp ensure_local_node_alive do
     if Node.alive?() do
-      {:ok, Net.get_erl_node()}
+      Net.get_erl_node()
     else
       {:error, :local_node_not_alive}
     end
   end
 
-  defp gen_remote_node_name(_host) do
-    # Always use @localhost because all distribution traffic goes through SSH tunnels
-    # that bind on localhost. Using the actual remote hostname would bypass the tunnels.
-    id = :crypto.strong_rand_bytes(8) |> Base.hex_encode32(case: :lower, padding: false)
-    :"fusion_#{id}@localhost"
+  # Always use @localhost because all distribution traffic goes through SSH tunnels
+  # that bind on localhost. Using the actual remote hostname would bypass the tunnels.
+  # The host label is included for debuggability when multiple connections exist.
+  defp gen_remote_node_name(host) do
+    id = :rand.bytes(8) |> Base.encode16(case: :lower)
+    label = host |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.slice(0, 20)
+    :"fusion_#{label}_#{id}@localhost"
   end
 end

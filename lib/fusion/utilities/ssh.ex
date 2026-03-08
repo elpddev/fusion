@@ -23,13 +23,16 @@ defmodule Fusion.Utilities.Ssh do
   @doc """
   Generate sshpass prefix for password authentication.
 
+  Uses `-e` flag to read password from SSHPASS environment variable,
+  avoiding shell injection and password exposure in `ps` output.
+
   ## Examples
 
-      iex> Fusion.Utilities.Ssh.partial_cmd_sshpass("abcd1234!", "/usr/bin/sshpass")
-      "/usr/bin/sshpass -p abcd1234!"
+      iex> Fusion.Utilities.Ssh.partial_cmd_sshpass("/usr/bin/sshpass")
+      "/usr/bin/sshpass -e"
   """
-  def partial_cmd_sshpass(password, sshpass_path \\ @default_sshpass_path) do
-    "#{sshpass_path} -p #{password}"
+  def partial_cmd_sshpass(sshpass_path \\ @default_sshpass_path) do
+    "#{sshpass_path} -e"
   end
 
   @doc """
@@ -59,24 +62,27 @@ defmodule Fusion.Utilities.Ssh do
   @doc """
   Generate a full SSH command string.
 
+  For password auth, the caller must set the `SSHPASS` environment variable
+  before executing the returned command.
+
   ## Examples
 
       iex> Fusion.Utilities.Ssh.cmd("-nNT -R 3001:localhost:3002", %{username: "john", password: "abcd1234"},
       ...>  %Fusion.Net.Spot{host: "example.com", port: 22})
-      "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -nNT -R 3001:localhost:3002 john@example.com"
+      "/usr/bin/env sshpass -e /usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -nNT -R 3001:localhost:3002 john@example.com"
 
       iex> Fusion.Utilities.Ssh.cmd("-nNT -R 3001:localhost:3002", %{username: "john", key_path: "/home/john/.ssh/id_rsa"},
       ...>  %Fusion.Net.Spot{host: "example.com", port: 22})
-      "/usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -i /home/john/.ssh/id_rsa -nNT -R 3001:localhost:3002 john@example.com"
+      ~s(/usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -i "/home/john/.ssh/id_rsa" -nNT -R 3001:localhost:3002 john@example.com)
   """
   def cmd(cmd, auth, remote, ssh_path \\ @default_ssh_path)
 
-  def cmd(cmd, %{username: username, password: password}, %Spot{} = remote, ssh_path) do
-    "#{partial_cmd_sshpass(password)} #{ssh_path} #{@default_ssh_opts} -p #{remote.port} #{cmd} #{username}@#{remote.host}"
+  def cmd(cmd, %{username: username, password: _password}, %Spot{} = remote, ssh_path) do
+    "#{partial_cmd_sshpass()} #{ssh_path} #{@default_ssh_opts} -p #{remote.port} #{cmd} #{username}@#{remote.host}"
   end
 
   def cmd(cmd, %{username: username, key_path: key_path}, %Spot{} = remote, ssh_path) do
-    "#{ssh_path} #{@default_ssh_opts} -p #{remote.port} -i #{key_path} #{cmd} #{username}@#{remote.host}"
+    "#{ssh_path} #{@default_ssh_opts} -p #{remote.port} -i \"#{Bash.escape_str(key_path)}\" #{cmd} #{username}@#{remote.host}"
   end
 
   @doc "Generate an SSH command to execute a remote command."
@@ -94,14 +100,14 @@ defmodule Fusion.Utilities.Ssh do
       ...>   4567,
       ...>   %Fusion.Net.Spot{host: "localhost", port: 2345},
       ...>   :reverse)
-      "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -nNT -R 4567:localhost:2345 john@example.com"
+      "/usr/bin/env sshpass -e /usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -nNT -R 4567:localhost:2345 john@example.com"
 
       iex> Fusion.Utilities.Ssh.cmd_port_tunnel(%{username: "john", password: "abcd1234"},
       ...>   %Fusion.Net.Spot{host: "example.com", port: 22},
       ...>   4567,
       ...>   %Fusion.Net.Spot{host: "localhost", port: 2345},
       ...>   :forward)
-      "/usr/bin/env sshpass -p abcd1234 /usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -nNT -4 -L 4567:localhost:2345 john@example.com"
+      "/usr/bin/env sshpass -e /usr/bin/env ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 22 -nNT -4 -L 4567:localhost:2345 john@example.com"
   """
   def cmd_port_tunnel(auth, %Spot{} = remote, from_port, %Spot{} = to_spot, :reverse) do
     partial_cmd_reverse_tunnel(from_port, to_spot)

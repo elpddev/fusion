@@ -15,6 +15,10 @@ defmodule Fusion.SshKeyProvider do
 
   require Logger
 
+  # RFC 8410 OIDs for EdDSA curves
+  @oid_ed25519 {1, 3, 101, 112}
+  @oid_ed448 {1, 3, 101, 113}
+
   @impl true
   def is_host_key(_key, _host, _port, _algorithm, _opts) do
     # Accept all host keys (equivalent to StrictHostKeyChecking=no)
@@ -41,19 +45,22 @@ defmodule Fusion.SshKeyProvider do
     key_path = Keyword.fetch!(opts, :key_path)
 
     case File.read(key_path) do
-      {:ok, pem} ->
-        case decode_private_key(pem) do
+      {:ok, key_data} ->
+        case decode_private_key(key_data) do
           {:ok, key} ->
             expected = key_type_for_algorithm(algorithm)
             actual = key_type(key)
 
+            # nil means unknown algorithm — skip the check rather than false-positive
             if expected != nil and expected != actual do
               Logger.warning(
                 "SSH key type mismatch: requested #{algorithm} but key at #{key_path} is #{actual}"
               )
-            end
 
-            {:ok, key}
+              {:error, :key_type_mismatch}
+            else
+              {:ok, key}
+            end
 
           error ->
             error
@@ -64,31 +71,22 @@ defmodule Fusion.SshKeyProvider do
     end
   end
 
-  @impl true
-  def sign(key, data, opts) do
-    # Prefer the hash algorithm from OTP's negotiation opts (e.g., rsa-sha2-512),
-    # falling back to our key-type-based default.
-    hash = Keyword.get(opts, :hash) || hash_for_key(key)
-    :public_key.sign(data, hash, key)
-  end
-
-  # Ed25519/Ed448 — EdDSA does its own hashing
-  defp hash_for_key({:ed_pri, _, _, _}), do: :none
-  defp hash_for_key({:ed_pub, _, _}), do: :none
-  # OTP 28 may represent Ed25519/Ed448 as ECPrivateKey with curve OIDs
-  defp hash_for_key({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 112}}, _, _}), do: :none
-  defp hash_for_key({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 113}}, _, _}), do: :none
-  # ECDSA (NIST curves)
-  defp hash_for_key({:ECPrivateKey, _, _, _, _, _}), do: :sha256
-  # RSA — use sha256 for rsa-sha2-256 (modern default)
-  defp hash_for_key(_), do: :sha256
-
   defp decode_private_key(data) do
     # Try OpenSSH key v1 format first (modern ssh-keygen default),
     # then fall back to PEM format for older keys.
-    with {:error, _} <- decode_openssh_key(data),
-         {:error, _} <- decode_pem_key(data) do
-      {:error, :unsupported_key_format}
+    # Short-circuit on definitive errors like :encrypted_key.
+    case decode_openssh_key(data) do
+      {:ok, _} = ok -> ok
+      {:error, :encrypted_key} = err -> err
+      {:error, _} -> fallback_decode_pem_key(data)
+    end
+  end
+
+  defp fallback_decode_pem_key(data) do
+    case decode_pem_key(data) do
+      {:ok, _} = ok -> ok
+      {:error, :encrypted_key} = err -> err
+      {:error, _} -> {:error, :unsupported_key_format}
     end
   end
 
@@ -98,12 +96,61 @@ defmodule Fusion.SshKeyProvider do
         {:ok, key}
 
       _ ->
-        {:error, :openssh_decode_failed}
+        # Decode failed — check if the key is encrypted (cipher != "none").
+        # OpenSSH v1 keys embed encryption info in the binary, not the PEM wrapper.
+        if openssh_key_encrypted?(data),
+          do: {:error, :encrypted_key},
+          else: {:error, :openssh_decode_failed}
     end
   rescue
-    _ -> {:error, :openssh_decode_failed}
+    e ->
+      Logger.debug("OpenSSH key decode raised: #{inspect(e)}")
+      {:error, :openssh_decode_failed}
   catch
-    _, _ -> {:error, :openssh_decode_failed}
+    _, reason ->
+      Logger.debug("OpenSSH key decode threw: #{inspect(reason)}")
+      {:error, :openssh_decode_failed}
+  end
+
+  # Check if an OpenSSH v1 key is encrypted by inspecting the cipher field.
+  # Format: "openssh-key-v1\0" + uint32 cipher_len + cipher_name + ...
+  # Unencrypted keys use cipher "none".
+  defp openssh_key_encrypted?(pem_data) do
+    case :public_key.pem_decode(pem_data) do
+      [{_type, der, _info} | _] ->
+        case der do
+          <<"openssh-key-v1", 0, len::32, cipher::binary-size(len), _::binary>> ->
+            cipher != "none"
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  defp decode_pem_key(data) do
+    case :public_key.pem_decode(data) do
+      [{_type, _der, :not_encrypted} = entry | _] ->
+        key = :public_key.pem_entry_decode(entry)
+        {:ok, key}
+
+      [{_type, _der, _encryption_info} | _] ->
+        {:error, :encrypted_key}
+
+      _ ->
+        {:error, :pem_decode_failed}
+    end
+  rescue
+    e ->
+      Logger.debug("PEM key decode raised: #{inspect(e)}")
+      {:error, :pem_decode_failed}
+  catch
+    _, reason ->
+      Logger.debug("PEM key decode threw: #{inspect(reason)}")
+      {:error, :pem_decode_failed}
   end
 
   defp key_type_for_algorithm(:"ssh-ed25519"), do: :ed25519
@@ -119,25 +166,10 @@ defmodule Fusion.SshKeyProvider do
   defp key_type({:ed_pri, :ed25519, _, _}), do: :ed25519
   defp key_type({:ed_pri, :ed448, _, _}), do: :ed448
   # OTP 28 may represent Ed25519/Ed448 as ECPrivateKey with namedCurve OIDs
-  defp key_type({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 112}}, _, _}), do: :ed25519
-  defp key_type({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 113}}, _, _}), do: :ed448
+  defp key_type({:ECPrivateKey, _, _, {:namedCurve, @oid_ed25519}, _, _}), do: :ed25519
+  defp key_type({:ECPrivateKey, _, _, {:namedCurve, @oid_ed448}, _, _}), do: :ed448
   # ECDSA curves (NIST P-256/P-384/P-521)
   defp key_type({:ECPrivateKey, _, _, {:namedCurve, _}, _, _}), do: :ecdsa
   defp key_type({:RSAPrivateKey, _, _, _, _, _, _, _, _, _, _}), do: :rsa
   defp key_type(_), do: :unknown
-
-  defp decode_pem_key(data) do
-    case :public_key.pem_decode(data) do
-      [{_type, _der, _info} = entry | _] ->
-        key = :public_key.pem_entry_decode(entry)
-        {:ok, key}
-
-      _ ->
-        {:error, :pem_decode_failed}
-    end
-  rescue
-    _ -> {:error, :pem_decode_failed}
-  catch
-    _, _ -> {:error, :pem_decode_failed}
-  end
 end
