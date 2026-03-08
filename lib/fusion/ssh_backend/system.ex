@@ -18,8 +18,8 @@ defmodule Fusion.SshBackend.System do
 
   defmodule Conn do
     @moduledoc false
-    @enforce_keys [:auth, :remote]
-    defstruct [:auth, :remote]
+    @enforce_keys [:auth, :remote, :resource_tracker]
+    defstruct [:auth, :remote, :resource_tracker]
 
     defimpl Inspect do
       def inspect(%{auth: auth, remote: remote}, opts) do
@@ -43,7 +43,8 @@ defmodule Fusion.SshBackend.System do
   @impl true
   def connect(%Fusion.Target{} = target) do
     {auth, remote} = to_auth_and_spot(target)
-    {:ok, %Conn{auth: auth, remote: remote}}
+    {:ok, tracker} = Agent.start_link(fn -> [] end)
+    {:ok, %Conn{auth: auth, remote: remote, resource_tracker: tracker}}
   end
 
   defp to_auth_and_spot(%Fusion.Target{} = target) do
@@ -72,7 +73,8 @@ defmodule Fusion.SshBackend.System do
     cmd = Ssh.cmd_port_tunnel(conn.auth, conn.remote, listen_port, to_spot, direction)
 
     case Exec.capture_std_mon(cmd, env: password_env(conn.auth)) do
-      {:ok, _port, _os_pid} ->
+      {:ok, port, os_pid} ->
+        Agent.update(conn.resource_tracker, &[{port, os_pid} | &1])
         {:ok, listen_port}
 
       error ->
@@ -131,10 +133,20 @@ defmodule Fusion.SshBackend.System do
   defp password_env(_auth), do: []
 
   @impl true
-  def close(%Conn{} = _conn) do
-    # System backend tunnel ports are owned by the calling process
-    # and will be cleaned up when that process terminates.
-    # The Erlang runtime automatically closes ports owned by a dying process.
+  def close(%Conn{resource_tracker: tracker} = _conn) do
+    resources = Agent.get(tracker, & &1)
+
+    for {port, os_pid} <- resources do
+      try do
+        Port.close(port)
+      catch
+        _, _ -> :ok
+      end
+
+      System.cmd("kill", [to_string(os_pid)], stderr_to_stdout: true)
+    end
+
+    Agent.stop(tracker)
     :ok
   end
 end
