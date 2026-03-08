@@ -40,9 +40,9 @@ defmodule Fusion.ExternalTest do
         after
           NodeManager.disconnect(manager)
           GenServer.stop(manager)
-          # Brief pause so the remote sshd releases tunnel listeners
-          # before the next test tries to bind the same local node port.
-          Process.sleep(300)
+          # Allow remote sshd to release tunnel listeners before the
+          # next test tries to bind the same local node port.
+          Process.sleep(1_000)
         end
 
       {:error, :local_node_not_alive} ->

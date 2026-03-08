@@ -45,9 +45,6 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Clean stale test build artifacts
-        run: rm -rf _build/test
-
       - name: Compile with warnings as errors
         run: mix compile --warnings-as-errors
 
