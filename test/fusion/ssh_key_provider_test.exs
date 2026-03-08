@@ -1,8 +1,6 @@
 defmodule Fusion.SshKeyProviderTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
-
   describe "is_host_key/5" do
     test "accepts any host key" do
       assert Fusion.SshKeyProvider.is_host_key(:fake_key, "host", 22, :ssh_rsa, [])
@@ -80,13 +78,8 @@ defmodule Fusion.SshKeyProviderTest do
     test "returns error when key type does not match requested algorithm", %{tmp_dir: tmp_dir} do
       key_path = generate_key(tmp_dir, "mismatch_key", "ed25519")
 
-      log =
-        capture_log(fn ->
-          assert {:error, :key_type_mismatch} =
-                   Fusion.SshKeyProvider.user_key(:"ssh-rsa", key_path: key_path)
-        end)
-
-      assert log =~ "key type mismatch"
+      assert {:error, :key_type_mismatch} =
+               Fusion.SshKeyProvider.user_key(:"ssh-rsa", key_path: key_path)
     end
   end
 

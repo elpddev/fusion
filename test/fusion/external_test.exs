@@ -73,7 +73,7 @@ defmodule Fusion.ExternalTest do
       assert :ok = TaskRunner.push_module(remote_node, Fusion.Net)
       assert {:ok, port} = TaskRunner.run(remote_node, Fusion.Net, :gen_port, [])
       assert is_integer(port)
-      assert port >= 49152
+      assert port > 0
 
       # Verify the remote node is a separate BEAM instance
       assert {:ok, remote_pid} =

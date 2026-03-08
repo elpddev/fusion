@@ -42,7 +42,9 @@ defmodule Fusion.SshKeyProvider do
 
   @impl true
   def user_key(algorithm, opts) do
-    key_path = Keyword.fetch!(opts, :key_path)
+    # Erlang SSH wraps key_cb options under :key_cb_private
+    private_opts = Keyword.get(opts, :key_cb_private, opts)
+    key_path = Keyword.fetch!(private_opts, :key_path)
 
     case File.read(key_path) do
       {:ok, key_data} ->
@@ -53,7 +55,7 @@ defmodule Fusion.SshKeyProvider do
 
             # nil means unknown algorithm — skip the check rather than false-positive
             if expected != nil and expected != actual do
-              Logger.warning(
+              Logger.debug(
                 "SSH key type mismatch: requested #{algorithm} but key at #{key_path} is #{actual}"
               )
 
