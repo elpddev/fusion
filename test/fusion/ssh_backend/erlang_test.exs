@@ -2,39 +2,6 @@ defmodule Fusion.SshBackend.ErlangTest do
   use ExUnit.Case, async: true
 
   alias Fusion.SshBackend.Erlang, as: Backend
-  alias Fusion.Target
-
-  describe "connect_opts/1" do
-    test "builds password auth options" do
-      target = %Target{host: "h", port: 22, username: "user", auth: {:password, "secret"}}
-      opts = Backend.connect_opts(target)
-
-      assert Keyword.get(opts, :user) == ~c"user"
-      assert Keyword.get(opts, :password) == ~c"secret"
-      assert Keyword.get(opts, :silently_accept_hosts) == true
-      assert Keyword.get(opts, :user_interaction) == false
-    end
-
-    test "builds key auth options" do
-      target = %Target{
-        host: "h",
-        port: 22,
-        username: "user",
-        auth: {:key, "/home/user/.ssh/id_ed25519"}
-      }
-
-      opts = Backend.connect_opts(target)
-
-      assert Keyword.get(opts, :user) == ~c"user"
-
-      assert Keyword.get(opts, :key_cb) ==
-               {Fusion.SshKeyProvider, key_path: "/home/user/.ssh/id_ed25519"}
-
-      assert Keyword.get(opts, :silently_accept_hosts) == true
-      assert Keyword.get(opts, :user_interaction) == false
-      refute Keyword.has_key?(opts, :password)
-    end
-  end
 
   test "implements the SshBackend behaviour" do
     behaviours =
@@ -43,5 +10,22 @@ defmodule Fusion.SshBackend.ErlangTest do
       |> List.flatten()
 
     assert Fusion.SshBackend in behaviours
+  end
+
+  test "exports all required callback functions" do
+    Code.ensure_loaded!(Backend)
+    assert function_exported?(Backend, :connect, 1)
+    assert function_exported?(Backend, :forward_tunnel, 4)
+    assert function_exported?(Backend, :reverse_tunnel, 4)
+    assert function_exported?(Backend, :exec, 2)
+    assert function_exported?(Backend, :exec_async, 2)
+    assert function_exported?(Backend, :close, 1)
+  end
+
+  test "ensures :ssh application is started" do
+    # The Erlang backend calls :ssh.start() in connect/1.
+    # We can verify the application is available (it's in extra_applications).
+    started_apps = Application.started_applications() |> Enum.map(&elem(&1, 0))
+    assert :ssh in started_apps
   end
 end

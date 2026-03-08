@@ -4,14 +4,25 @@ defmodule Fusion.SshBackend.Erlang do
 
   This is the default backend. It uses OTP's SSH implementation
   for connections, tunnels, and remote command execution.
+
+  ## Security
+
+  Host key verification is disabled (`silently_accept_hosts: true`).
+  All remote host keys are accepted without checking, equivalent to
+  `StrictHostKeyChecking=no` in OpenSSH. This means connections are
+  vulnerable to MITM attacks. This is acceptable for trusted networks
+  and development, but should be noted for production deployments.
   """
 
   require Logger
 
   @behaviour Fusion.SshBackend
 
+  @localhost_bind ~c"127.0.0.1"
   @connect_timeout 15_000
+  @tunnel_timeout 15_000
   @exec_timeout 30_000
+  @exec_async_timeout 300_000
 
   @impl true
   def connect(%Fusion.Target{} = target) do
@@ -44,11 +55,11 @@ defmodule Fusion.SshBackend.Erlang do
 
     :ssh.tcpip_tunnel_to_server(
       conn,
-      ~c"127.0.0.1",
+      @localhost_bind,
       listen_port,
       String.to_charlist(connect_host),
       connect_port,
-      @connect_timeout
+      @tunnel_timeout
     )
   end
 
@@ -60,11 +71,11 @@ defmodule Fusion.SshBackend.Erlang do
 
     :ssh.tcpip_tunnel_from_server(
       conn,
-      ~c"127.0.0.1",
+      @localhost_bind,
       listen_port,
       String.to_charlist(connect_host),
       connect_port,
-      @connect_timeout
+      @tunnel_timeout
     )
   end
 
@@ -97,6 +108,9 @@ defmodule Fusion.SshBackend.Erlang do
                 receive do
                   {:ssh_cm, ^conn, {:closed, ^ch}} -> :ok
                   {:DOWN, ^ref, :process, ^conn, _reason} -> :ok
+                after
+                  @exec_async_timeout ->
+                    Logger.warning("SSH exec_async timed out after #{@exec_async_timeout}ms")
                 end
 
               :failure ->
@@ -118,8 +132,7 @@ defmodule Fusion.SshBackend.Erlang do
     :ok
   end
 
-  @doc false
-  def connect_opts(%Fusion.Target{} = target) do
+  defp connect_opts(%Fusion.Target{} = target) do
     base_opts = [
       user: String.to_charlist(target.username),
       silently_accept_hosts: true,
@@ -155,6 +168,8 @@ defmodule Fusion.SshBackend.Erlang do
       {:ssh_cm, ^conn, {:closed, ^ch}} ->
         case exit_code do
           0 -> {:ok, stdout}
+          # Some SSH servers close the channel without sending exit_status.
+          # Treat this as success since we received all the output.
           nil -> {:ok, stdout}
           code -> {:error, {:exit_code, code, stdout, stderr}}
         end

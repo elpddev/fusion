@@ -132,15 +132,23 @@ defmodule Fusion.NodeManager do
       case backend.connect(target) do
         {:ok, conn} ->
           result =
-            with {:ok, _} <-
-                   backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
-                 {:ok, _} <-
-                   backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
-                 {:ok, _} <-
-                   backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port),
-                 cmd =
-                   build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port),
-                 {:ok, _} <- backend.exec_async(conn, cmd),
+            with :ok <-
+                   setup_tunnels(
+                     backend,
+                     conn,
+                     local_node,
+                     remote_node_port,
+                     epmd_tunnel_port,
+                     epmd_port
+                   ),
+                 :ok <-
+                   launch_remote_node(
+                     backend,
+                     conn,
+                     remote_node_name,
+                     epmd_tunnel_port,
+                     remote_node_port
+                   ),
                  :ok <- wait_for_connection(remote_node_name, @connect_timeout) do
               Logger.info("Connected to remote node #{remote_node_name}")
               Node.monitor(remote_node_name, true)
@@ -159,19 +167,7 @@ defmodule Fusion.NodeManager do
               success
 
             {:error, _} = error ->
-              # Try to kill orphaned remote process before closing
-              try do
-                backend.exec(
-                  conn,
-                  "kill -9 $(pgrep -f '#{remote_node_name}') 2>/dev/null || true"
-                )
-              rescue
-                _ -> :ok
-              catch
-                _, _ -> :ok
-              end
-
-              backend.close(conn)
+              cleanup_failed_connect(backend, conn, remote_node_name)
               error
           end
 
@@ -181,6 +177,53 @@ defmodule Fusion.NodeManager do
     end
   end
 
+  defp setup_tunnels(backend, conn, local_node, remote_node_port, epmd_tunnel_port, epmd_port) do
+    with {:ok, _} <-
+           backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
+         {:ok, _} <-
+           backend.forward_tunnel(conn, remote_node_port, "localhost", remote_node_port),
+         {:ok, _} <-
+           backend.reverse_tunnel(conn, epmd_tunnel_port, "localhost", epmd_port) do
+      :ok
+    end
+  end
+
+  defp launch_remote_node(backend, conn, remote_node_name, epmd_tunnel_port, remote_node_port) do
+    cmd = build_remote_node_cmd(remote_node_name, epmd_tunnel_port, remote_node_port)
+
+    case backend.exec_async(conn, cmd) do
+      {:ok, _} -> :ok
+      {:error, _} = error -> error
+    end
+  end
+
+  defp cleanup_failed_connect(backend, conn, remote_node_name) do
+    # Kill orphaned remote process if one was started.
+    # Note: remote_node_name is internally generated (not user input),
+    # so shell interpolation here is safe.
+    try do
+      backend.exec(
+        conn,
+        "kill -9 $(pgrep -f '#{remote_node_name}') 2>/dev/null || true"
+      )
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+
+    try do
+      backend.close(conn)
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+  end
+
+  # All values interpolated into this command (cookie, node_name, ports) come
+  # from trusted internal sources — cookie from Node.get_cookie(), node_name
+  # from gen_remote_node_name/1, and ports from Net.gen_port/0.
   defp build_remote_node_cmd(node_name, epmd_port, node_port) do
     cookie = Node.get_cookie()
 
@@ -221,16 +264,14 @@ defmodule Fusion.NodeManager do
   defp do_disconnect(state) do
     backend = state.target.ssh_backend
 
-    # Try graceful shutdown via RPC first
+    # Request graceful shutdown via async RPC (cast won't block if remote is hung)
     if state.remote_node_name do
       try do
-        :rpc.call(state.remote_node_name, System, :stop, [0])
+        :rpc.cast(state.remote_node_name, System, :stop, [0])
       catch
         _, _ -> :ok
       end
 
-      # Small delay for graceful shutdown
-      Process.sleep(100)
       Node.disconnect(state.remote_node_name)
     end
 
@@ -259,7 +300,7 @@ defmodule Fusion.NodeManager do
   defp gen_remote_node_name(_host) do
     # Always use @localhost because all distribution traffic goes through SSH tunnels
     # that bind on localhost. Using the actual remote hostname would bypass the tunnels.
-    id = :rand.uniform(999_999) |> Integer.to_string() |> String.pad_leading(6, "0")
-    :"fusion_worker_#{id}@localhost"
+    id = :crypto.strong_rand_bytes(8) |> Base.hex_encode32(case: :lower, padding: false)
+    :"fusion_#{id}@localhost"
   end
 end

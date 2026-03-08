@@ -14,7 +14,7 @@ defmodule Fusion.SshBackend.System do
 
   defmodule Conn do
     @moduledoc false
-    defstruct auth: nil, remote: nil, tunnels: [], os_pids: []
+    defstruct auth: nil, remote: nil
   end
 
   @impl true
@@ -25,26 +25,17 @@ defmodule Fusion.SshBackend.System do
 
   @impl true
   def forward_tunnel(%Conn{} = conn, listen_port, connect_host, connect_port) do
-    to_spot = %Spot{host: connect_host, port: connect_port}
-
-    cmd =
-      Ssh.cmd_port_tunnel(conn.auth, conn.remote, listen_port, to_spot, :forward)
-
-    case Exec.capture_std_mon(cmd) do
-      {:ok, _port, _os_pid} ->
-        {:ok, listen_port}
-
-      error ->
-        error
-    end
+    do_tunnel(conn, listen_port, connect_host, connect_port, :forward)
   end
 
   @impl true
   def reverse_tunnel(%Conn{} = conn, listen_port, connect_host, connect_port) do
-    to_spot = %Spot{host: connect_host, port: connect_port}
+    do_tunnel(conn, listen_port, connect_host, connect_port, :reverse)
+  end
 
-    cmd =
-      Ssh.cmd_port_tunnel(conn.auth, conn.remote, listen_port, to_spot, :reverse)
+  defp do_tunnel(conn, listen_port, connect_host, connect_port, direction) do
+    to_spot = %Spot{host: connect_host, port: connect_port}
+    cmd = Ssh.cmd_port_tunnel(conn.auth, conn.remote, listen_port, to_spot, direction)
 
     case Exec.capture_std_mon(cmd) do
       {:ok, _port, _os_pid} ->

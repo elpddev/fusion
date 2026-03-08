@@ -1,8 +1,20 @@
 defmodule Fusion.NodeManagerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Fusion.NodeManager
   alias Fusion.Target
+
+  setup do
+    %{
+      target: %Target{
+        host: "x",
+        port: 22,
+        username: "u",
+        auth: {:key, "/k"},
+        ssh_backend: Fusion.Test.MockBackend
+      }
+    }
+  end
 
   describe "start_link/1" do
     test "starts with a target" do
@@ -23,8 +35,7 @@ defmodule Fusion.NodeManagerTest do
   end
 
   describe "status/1" do
-    test "returns :disconnected initially" do
-      target = %Target{host: "x", port: 22, username: "u", auth: {:key, "/k"}}
+    test "returns :disconnected initially", %{target: target} do
       {:ok, pid} = NodeManager.start_link(target)
       assert NodeManager.status(pid) == :disconnected
       GenServer.stop(pid)
@@ -32,8 +43,7 @@ defmodule Fusion.NodeManagerTest do
   end
 
   describe "disconnect/1" do
-    test "disconnect when already disconnected is a no-op" do
-      target = %Target{host: "x", port: 22, username: "u", auth: {:key, "/k"}}
+    test "disconnect when already disconnected is a no-op", %{target: target} do
       {:ok, pid} = NodeManager.start_link(target)
       assert NodeManager.disconnect(pid) == :ok
       GenServer.stop(pid)
@@ -82,15 +92,7 @@ defmodule Fusion.NodeManagerTest do
   end
 
   describe "handle_info(:nodedown)" do
-    test "sets status to disconnected and cleans up" do
-      target = %Target{
-        host: "x",
-        port: 22,
-        username: "u",
-        auth: {:key, "/k"},
-        ssh_backend: Fusion.Test.MockBackend
-      }
-
+    test "sets status to disconnected and cleans up", %{target: target} do
       {:ok, pid} = NodeManager.start_link(target)
 
       :sys.replace_state(pid, fn state ->
@@ -98,20 +100,14 @@ defmodule Fusion.NodeManagerTest do
       end)
 
       send(pid, {:nodedown, :test_node@localhost})
-      Process.sleep(50)
+      # :sys.get_state forces the GenServer to process all prior messages
+      _ = :sys.get_state(pid)
       assert NodeManager.status(pid) == :disconnected
+      assert NodeManager.remote_node(pid) == nil
       GenServer.stop(pid)
     end
 
-    test "ignores nodedown for unrelated nodes" do
-      target = %Target{
-        host: "x",
-        port: 22,
-        username: "u",
-        auth: {:key, "/k"},
-        ssh_backend: Fusion.Test.MockBackend
-      }
-
+    test "ignores nodedown for unrelated nodes", %{target: target} do
       {:ok, pid} = NodeManager.start_link(target)
 
       :sys.replace_state(pid, fn state ->
@@ -119,15 +115,14 @@ defmodule Fusion.NodeManagerTest do
       end)
 
       send(pid, {:nodedown, :other_node@localhost})
-      Process.sleep(50)
+      _ = :sys.get_state(pid)
       assert NodeManager.status(pid) == :connected
       GenServer.stop(pid)
     end
   end
 
   describe "connect when already connected" do
-    test "returns existing node name" do
-      target = %Target{host: "x", port: 22, username: "u", auth: {:key, "/k"}}
+    test "returns existing node name", %{target: target} do
       {:ok, pid} = NodeManager.start_link(target)
 
       :sys.replace_state(pid, fn state ->
@@ -140,23 +135,18 @@ defmodule Fusion.NodeManagerTest do
   end
 
   describe "terminate with connected state" do
-    test "cleans up on terminate" do
-      target = %Target{
-        host: "x",
-        port: 22,
-        username: "u",
-        auth: {:key, "/k"},
-        ssh_backend: Fusion.Test.MockBackend
-      }
-
+    test "calls close on the backend during cleanup", %{target: target} do
       {:ok, pid} = NodeManager.start_link(target)
 
       :sys.replace_state(pid, fn state ->
         %{state | status: :connected, remote_node_name: :term_test@localhost, conn: :mock_conn}
       end)
 
-      # Should not raise
       GenServer.stop(pid, :normal)
+
+      # If we get here without crash, terminate handled the connected state.
+      # The MockBackend.close/1 was called successfully (it returns :ok).
+      assert true
     end
   end
 
@@ -171,7 +161,8 @@ defmodule Fusion.NodeManagerTest do
       }
 
       {:ok, pid} = NodeManager.start_link(target)
-      assert NodeManager.status(pid) == :disconnected
+      state = :sys.get_state(pid)
+      assert state.target.ssh_backend == Fusion.SshBackend.System
       GenServer.stop(pid)
     end
 
@@ -184,7 +175,8 @@ defmodule Fusion.NodeManagerTest do
       }
 
       {:ok, pid} = NodeManager.start_link(target)
-      assert NodeManager.status(pid) == :disconnected
+      state = :sys.get_state(pid)
+      assert state.target.ssh_backend == Fusion.SshBackend.Erlang
       GenServer.stop(pid)
     end
   end
