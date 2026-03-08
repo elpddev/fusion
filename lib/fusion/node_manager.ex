@@ -17,7 +17,7 @@ defmodule Fusion.NodeManager do
 
   @connect_timeout 15_000
   @connect_retry_interval 500
-  @tunnel_retry_attempts 20
+  @tunnel_retry_attempts 10
   @tunnel_retry_interval 500
   @default_elixir_path "/usr/bin/env elixir"
   @tunnel_connect_host "127.0.0.1"

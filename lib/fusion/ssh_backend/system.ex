@@ -136,14 +136,24 @@ defmodule Fusion.SshBackend.System do
   def close(%Conn{resource_tracker: tracker} = _conn) do
     resources = Agent.get(tracker, & &1)
 
-    for {port, os_pid} <- resources do
+    # Close ports (sends SIGHUP), letting SSH processes cleanly disconnect.
+    # A clean disconnect sends SSH_MSG_DISCONNECT so the remote sshd
+    # immediately releases tunnel listeners. SIGKILL would skip this,
+    # leaving the remote holding stale listeners until TCP keepalive fires.
+    for {port, _os_pid} <- resources do
       try do
         Port.close(port)
       catch
         _, _ -> :ok
       end
+    end
 
-      System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
+    # Brief wait for clean SSH disconnects to complete
+    Process.sleep(200)
+
+    # SIGTERM any stragglers (still allows clean shutdown unlike SIGKILL)
+    for {_port, os_pid} <- resources do
+      System.cmd("kill", [to_string(os_pid)], stderr_to_stdout: true)
     end
 
     Agent.stop(tracker)
