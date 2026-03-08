@@ -5,3 +5,6 @@
 *.beam
 test/docker/.keys/
 .worktrees/
+tmp/
+/cover/
+erl_crash.dump

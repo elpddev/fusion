@@ -60,7 +60,7 @@ defmodule Fusion.Connector do
   ## Private
 
   defp do_start_connector(%__MODULE__{auth: auth, remote: remote} = state) do
-    origin_node = Net.get_erl_node()
+    {:ok, origin_node} = Net.get_erl_node()
     remote_node = gen_remote_node_info(origin_node.host, origin_node.cookie)
     epmd_port = Net.get_epmd_port()
     epmd_remote_port = Net.gen_port()

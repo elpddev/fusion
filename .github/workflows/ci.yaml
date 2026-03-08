@@ -48,5 +48,17 @@ jobs:
       - name: Compile with warnings as errors
         run: mix compile --warnings-as-errors
 
-      - name: Run tests
+      - name: Run unit tests
         run: mix test
+
+      - name: Start SSH test container
+        run: cd test/docker && bash run.sh start
+
+      - name: Verify SSH container is ready
+        run: |
+          ssh -i test/docker/.keys/test_key -p 2222 \
+            -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+            fusion_test@localhost echo ok
+
+      - name: Run external tests
+        run: elixir --sname ci_test@localhost -S mix test --include external

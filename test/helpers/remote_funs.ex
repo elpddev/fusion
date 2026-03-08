@@ -6,4 +6,6 @@ defmodule Fusion.Test.Helpers.RemoteFuns do
   def get_self, do: self()
 
   def make_spot(port), do: %Fusion.Net.Spot{host: "test", port: port}
+
+  def multiply(a, b), do: a * b
 end

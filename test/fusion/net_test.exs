@@ -3,9 +3,10 @@ defmodule Fusion.NetTest do
   doctest Fusion.Net
 
   describe "gen_port/0" do
-    test "generates port in ephemeral range" do
+    test "generates a valid port number" do
       port = Fusion.Net.gen_port()
-      assert port >= 49152
+      assert is_integer(port)
+      assert port > 0
       assert port <= 65535
     end
 

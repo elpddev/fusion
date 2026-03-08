@@ -31,7 +31,7 @@ start() {
   # Wait for SSH to be ready
   echo -n "Waiting for SSH..."
   for i in $(seq 1 30); do
-    if docker exec "$CONTAINER_NAME" sh -c "ss -tlnp | grep -q ':22'" 2>/dev/null; then
+    if docker exec "$CONTAINER_NAME" sh -c "cat /proc/net/tcp 2>/dev/null | grep -q '00000000:0016'" 2>/dev/null; then
       echo " ready!"
       break
     fi

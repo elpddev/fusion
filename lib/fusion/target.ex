@@ -1,30 +1,27 @@
 defmodule Fusion.Target do
   @moduledoc "Represents an SSH connection target."
 
-  defstruct host: nil, port: 22, username: nil, auth: nil
+  @enforce_keys [:host, :username, :auth]
+  defstruct [:host, :username, :auth, port: 22, ssh_backend: Fusion.SshBackend.Erlang]
 
   @type auth :: {:key, String.t()} | {:password, String.t()}
 
   @type t :: %__MODULE__{
           host: String.t(),
-          port: non_neg_integer(),
+          port: pos_integer(),
           username: String.t(),
-          auth: auth()
+          auth: auth(),
+          ssh_backend: module()
         }
 
-  @doc """
-  Converts a Target into the legacy auth/remote format used by tunnel modules.
+  defimpl Inspect do
+    def inspect(%{auth: {:password, _}} = target, opts) do
+      redacted = %{target | auth: {:password, "**REDACTED**"}}
+      Inspect.Any.inspect(redacted, opts)
+    end
 
-  Returns `{auth_map, %Fusion.Net.Spot{}}`.
-  """
-  def to_auth_and_spot(%__MODULE__{} = target) do
-    auth =
-      case target.auth do
-        {:key, path} -> %{username: target.username, key_path: path}
-        {:password, pass} -> %{username: target.username, password: pass}
-      end
-
-    remote = %Fusion.Net.Spot{host: target.host, port: target.port}
-    {auth, remote}
+    def inspect(target, opts) do
+      Inspect.Any.inspect(target, opts)
+    end
   end
 end

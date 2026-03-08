@@ -21,7 +21,7 @@ Fusion connects to remote servers via SSH, sets up port tunnels for Erlang distr
 
 - Elixir ~> 1.18 / OTP 28+
 - Remote server with Elixir/Erlang installed
-- SSH access (key-based or password via `sshpass`)
+- SSH access (key-based or password)
 
 ## Installation
 
@@ -119,6 +119,21 @@ Disconnect when done:
 Fusion.NodeManager.disconnect(manager)
 ```
 
+### SSH Backend
+
+Fusion uses Erlang's built-in SSH module by default. No system `ssh` binary required.
+
+To use the legacy system SSH backend instead:
+
+```elixir
+target = %Fusion.Target{
+  host: "10.0.1.5",
+  username: "deploy",
+  auth: {:key, "~/.ssh/id_ed25519"},
+  ssh_backend: Fusion.SshBackend.System  # uses system ssh/sshpass
+}
+```
+
 ### Automatic Dependency Resolution
 
 When you run `RemoteHealth` remotely, Fusion reads the BEAM bytecode, walks the dependency tree, and pushes everything the module needs. You don't need to manually track the dependency chain.
@@ -199,7 +214,11 @@ cd test/docker && ./run.sh stop
 Fusion (public API)
 ├── TaskRunner        - Remote code execution + module pushing + dependency resolution
 ├── NodeManager       - GenServer: tunnel setup, BEAM bootstrap, connection lifecycle
-├── Target            - SSH connection configuration struct
+├── Target            - SSH connection configuration struct (includes ssh_backend selection)
+├── SshBackend        - Behaviour for pluggable SSH implementations
+│   ├── Erlang        - Default: uses OTP's built-in :ssh module
+│   └── System        - Legacy: shells out to system ssh/sshpass binaries
+├── SshKeyProvider    - Custom ssh_client_key_api for specific key file paths
 ├── TunnelSupervisor  - DynamicSupervisor for tunnel processes
 ├── Net               - Port generation, EPMD utilities
 ├── Connector         - SSH connection GenServer
