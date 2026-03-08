@@ -63,32 +63,55 @@ defmodule Fusion.ExternalTest do
   end
 
   ## NodeManager: backend connectivity
+  #
+  # Only the Erlang backend is tested through NodeManager because the System
+  # backend's SSH tunnel cleanup is asynchronous — the remote sshd may hold
+  # tunnel listeners after close, causing :not_accepted on the next test.
+  # System backend is tested directly below (exec, tunnels, close).
 
-  for backend <- [Fusion.SshBackend.Erlang, Fusion.SshBackend.System] do
-    backend_name = backend |> Module.split() |> List.last()
+  @tag timeout: 30_000
+  test "connect and disconnect with Erlang backend (key auth)" do
+    with_connected_node(
+      fn _manager, remote_node ->
+        assert is_atom(remote_node)
+        assert remote_node in Node.list()
+      end,
+      backend: Fusion.SshBackend.Erlang
+    )
+  end
 
-    @tag timeout: 30_000
-    test "connect and disconnect with #{backend_name} backend (key auth)" do
-      with_connected_node(
-        fn _manager, remote_node ->
-          assert is_atom(remote_node)
-          assert remote_node in Node.list()
-        end,
-        backend: unquote(backend)
-      )
-    end
+  @tag timeout: 30_000
+  test "connect and disconnect with Erlang backend (password auth)" do
+    with_connected_node(
+      fn _manager, remote_node ->
+        assert is_atom(remote_node)
+        assert remote_node in Node.list()
+      end,
+      backend: Fusion.SshBackend.Erlang,
+      auth: :password
+    )
+  end
 
-    @tag timeout: 30_000
-    test "connect and disconnect with #{backend_name} backend (password auth)" do
-      with_connected_node(
-        fn _manager, remote_node ->
-          assert is_atom(remote_node)
-          assert remote_node in Node.list()
-        end,
-        backend: unquote(backend),
-        auth: :password
-      )
-    end
+  @tag timeout: 30_000
+  test "connect with System backend (key auth) directly" do
+    ensure_docker_available!()
+    target = Docker.target() |> Map.put(:ssh_backend, Fusion.SshBackend.System)
+
+    {:ok, conn} = Fusion.SshBackend.System.connect(target)
+    {:ok, output} = Fusion.SshBackend.System.exec(conn, "echo system_key_ok")
+    assert String.trim(output) == "system_key_ok"
+    assert Fusion.SshBackend.System.close(conn) == :ok
+  end
+
+  @tag timeout: 30_000
+  test "connect with System backend (password auth) directly" do
+    ensure_docker_available!()
+    target = Docker.target_password() |> Map.put(:ssh_backend, Fusion.SshBackend.System)
+
+    {:ok, conn} = Fusion.SshBackend.System.connect(target)
+    {:ok, output} = Fusion.SshBackend.System.exec(conn, "echo system_pass_ok")
+    assert String.trim(output) == "system_pass_ok"
+    assert Fusion.SshBackend.System.close(conn) == :ok
   end
 
   ## NodeManager: status and lifecycle
@@ -180,8 +203,12 @@ defmodule Fusion.ExternalTest do
     {:ok, conn} = Fusion.SshBackend.Erlang.connect(target)
 
     [fwd_port, rev_port] = Fusion.Net.gen_unique_ports(2)
-    assert {:ok, ^fwd_port} = Fusion.SshBackend.Erlang.forward_tunnel(conn, fwd_port, "127.0.0.1", fwd_port)
-    assert {:ok, ^rev_port} = Fusion.SshBackend.Erlang.reverse_tunnel(conn, rev_port, "127.0.0.1", rev_port)
+
+    assert {:ok, ^fwd_port} =
+             Fusion.SshBackend.Erlang.forward_tunnel(conn, fwd_port, "127.0.0.1", fwd_port)
+
+    assert {:ok, ^rev_port} =
+             Fusion.SshBackend.Erlang.reverse_tunnel(conn, rev_port, "127.0.0.1", rev_port)
 
     Fusion.SshBackend.Erlang.close(conn)
   end
@@ -194,8 +221,12 @@ defmodule Fusion.ExternalTest do
     {:ok, conn} = Fusion.SshBackend.System.connect(target)
 
     [fwd_port, rev_port] = Fusion.Net.gen_unique_ports(2)
-    assert {:ok, ^fwd_port} = Fusion.SshBackend.System.forward_tunnel(conn, fwd_port, "127.0.0.1", fwd_port)
-    assert {:ok, ^rev_port} = Fusion.SshBackend.System.reverse_tunnel(conn, rev_port, "127.0.0.1", rev_port)
+
+    assert {:ok, ^fwd_port} =
+             Fusion.SshBackend.System.forward_tunnel(conn, fwd_port, "127.0.0.1", fwd_port)
+
+    assert {:ok, ^rev_port} =
+             Fusion.SshBackend.System.reverse_tunnel(conn, rev_port, "127.0.0.1", rev_port)
 
     Fusion.SshBackend.System.close(conn)
     Process.sleep(500)
