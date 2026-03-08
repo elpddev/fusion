@@ -17,45 +17,35 @@ defmodule Fusion.ExternalTest do
 
   @moduletag :external
 
-  defp skip_unless_docker_available do
-    cond do
-      not Docker.available?() ->
-        IO.puts("SKIP: Docker container not running (cd test/docker && ./run.sh start)")
-        :skip
+  defp ensure_docker_available! do
+    unless Docker.available?() do
+      flunk("Docker container not running (cd test/docker && ./run.sh start)")
+    end
 
-      not Docker.ssh_works?() ->
-        IO.puts("SKIP: SSH to Docker container failed")
-        :skip
-
-      true ->
-        :ok
+    unless Docker.ssh_works?() do
+      flunk("SSH to Docker container failed")
     end
   end
 
   defp with_connected_node(fun) do
-    case skip_unless_docker_available() do
-      :skip ->
-        :ok
+    ensure_docker_available!()
+    target = Docker.target()
+    {:ok, manager} = NodeManager.start_link(target)
 
-      :ok ->
-        target = Docker.target()
-        {:ok, manager} = NodeManager.start_link(target)
-
-        case NodeManager.connect(manager) do
-          {:ok, remote_node} ->
-            try do
-              fun.(remote_node)
-            after
-              NodeManager.disconnect(manager)
-              GenServer.stop(manager)
-            end
-
-          {:error, :local_node_not_alive} ->
-            IO.puts("SKIP: Run with --sname flag")
-
-          {:error, reason} ->
-            flunk("Connection to Docker container failed: #{inspect(reason)}")
+    case NodeManager.connect(manager) do
+      {:ok, remote_node} ->
+        try do
+          fun.(remote_node)
+        after
+          NodeManager.disconnect(manager)
+          GenServer.stop(manager)
         end
+
+      {:error, :local_node_not_alive} ->
+        flunk("Local node not alive (run with --sname flag)")
+
+      {:error, reason} ->
+        flunk("Connection to Docker container failed: #{inspect(reason)}")
     end
   end
 
