@@ -1,27 +1,12 @@
 defmodule Fusion.SshBackend.SystemTest do
   use ExUnit.Case, async: true
 
+  import Fusion.Test.SshBackendSharedTests
+
   alias Fusion.SshBackend.System, as: Backend
   alias Fusion.Target
 
-  test "implements the SshBackend behaviour" do
-    behaviours =
-      Backend.__info__(:attributes)
-      |> Keyword.get_values(:behaviour)
-      |> List.flatten()
-
-    assert Fusion.SshBackend in behaviours
-  end
-
-  test "exports all required callback functions" do
-    Code.ensure_loaded!(Backend)
-    assert function_exported?(Backend, :connect, 1)
-    assert function_exported?(Backend, :forward_tunnel, 4)
-    assert function_exported?(Backend, :reverse_tunnel, 4)
-    assert function_exported?(Backend, :exec, 2)
-    assert function_exported?(Backend, :exec_async, 2)
-    assert function_exported?(Backend, :close, 1)
-  end
+  assert_implements_ssh_backend(Backend)
 
   test "connect returns a conn struct with auth and remote" do
     target = %Target{

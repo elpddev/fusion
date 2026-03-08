@@ -13,11 +13,9 @@ defmodule Fusion.Target do
           ssh_backend: module()
         }
 
-  @doc """
-  Converts a Target into the legacy auth/remote format used by tunnel modules.
-
-  Returns `{auth_map, %Fusion.Net.Spot{}}`.
-  """
+  @doc false
+  # Converts a Target into the legacy auth/remote format used by
+  # Fusion.SshBackend.System and tunnel modules.
   def to_auth_and_spot(%__MODULE__{} = target) do
     auth =
       case target.auth do

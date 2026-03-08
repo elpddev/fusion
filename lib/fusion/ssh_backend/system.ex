@@ -8,15 +8,21 @@ defmodule Fusion.SshBackend.System do
 
   @behaviour Fusion.SshBackend
 
+  require Logger
+
   alias Fusion.Utilities.Ssh
   alias Fusion.Utilities.Exec
   alias Fusion.Net.Spot
+
+  @drain_timeout 300_000
 
   defmodule Conn do
     @moduledoc false
     defstruct auth: nil, remote: nil
   end
 
+  # Note: unlike the Erlang backend, connect/1 does not establish a TCP connection.
+  # Connection validation is deferred until the first tunnel or exec call.
   @impl true
   def connect(%Fusion.Target{} = target) do
     {auth, remote} = Fusion.Target.to_auth_and_spot(target)
@@ -75,6 +81,9 @@ defmodule Fusion.SshBackend.System do
     receive do
       {^port, {:data, _data}} -> drain_port(port)
       {^port, {:exit_status, _code}} -> :ok
+    after
+      @drain_timeout ->
+        Logger.warning("System exec_async drain_port timed out after #{@drain_timeout}ms")
     end
   end
 

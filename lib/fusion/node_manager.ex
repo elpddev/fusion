@@ -75,23 +75,28 @@ defmodule Fusion.NodeManager do
     end
   end
 
+  @impl true
   def handle_call(:connect, _from, %{status: :connected} = state) do
     {:reply, {:ok, state.remote_node_name}, state}
   end
 
+  @impl true
   def handle_call(:disconnect, _from, %{status: :connected} = state) do
     new_state = do_disconnect(state)
     {:reply, :ok, new_state}
   end
 
+  @impl true
   def handle_call(:disconnect, _from, %{status: :disconnected} = state) do
     {:reply, :ok, state}
   end
 
+  @impl true
   def handle_call(:remote_node, _from, state) do
     {:reply, state.remote_node_name, state}
   end
 
+  @impl true
   def handle_call(:status, _from, state) do
     {:reply, state.status, state}
   end
@@ -103,6 +108,7 @@ defmodule Fusion.NodeManager do
     {:noreply, new_state}
   end
 
+  @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -113,6 +119,7 @@ defmodule Fusion.NodeManager do
     :ok
   end
 
+  @impl true
   def terminate(_reason, _state), do: :ok
 
   ## Private
@@ -177,6 +184,9 @@ defmodule Fusion.NodeManager do
     end
   end
 
+  # The "localhost" here is the connect_host passed to the backend's tunnel functions.
+  # The Erlang backend binds the tunnel listener on 127.0.0.1 (numeric, no DNS lookup).
+  # "localhost" is used as the connect_host which resolves to 127.0.0.1 on the remote side.
   defp setup_tunnels(backend, conn, local_node, remote_node_port, epmd_tunnel_port, epmd_port) do
     with {:ok, _} <-
            backend.reverse_tunnel(conn, local_node.port, "localhost", local_node.port),
@@ -198,22 +208,25 @@ defmodule Fusion.NodeManager do
   end
 
   defp cleanup_failed_connect(backend, conn, remote_node_name) do
-    # Kill orphaned remote process if one was started.
-    # Note: remote_node_name is internally generated (not user input),
-    # so shell interpolation here is safe.
-    try do
+    kill_remote_process(backend, conn, remote_node_name)
+    safe_call(fn -> backend.close(conn) end)
+  end
+
+  # Kill the remote BEAM process via SSH exec. Used as cleanup when the
+  # distribution layer is unavailable. remote_node_name is internally generated
+  # (not user input), so shell interpolation here is safe.
+  defp kill_remote_process(backend, conn, remote_node_name) do
+    safe_call(fn ->
       backend.exec(
         conn,
         "kill -9 $(pgrep -f '#{remote_node_name}') 2>/dev/null || true"
       )
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
-    end
+    end)
+  end
 
+  defp safe_call(fun) do
     try do
-      backend.close(conn)
+      fun.()
     rescue
       _ -> :ok
     catch
@@ -264,26 +277,21 @@ defmodule Fusion.NodeManager do
   defp do_disconnect(state) do
     backend = state.target.ssh_backend
 
-    # Request graceful shutdown via async RPC (cast won't block if remote is hung)
     if state.remote_node_name do
-      try do
-        :rpc.cast(state.remote_node_name, System, :stop, [0])
-      catch
-        _, _ -> :ok
-      end
-
+      # Request graceful shutdown via async RPC (cast won't block if remote is hung)
+      safe_call(fn -> :rpc.cast(state.remote_node_name, System, :stop, [0]) end)
       Node.disconnect(state.remote_node_name)
+
+      # If RPC couldn't reach the node (e.g., distribution already broken),
+      # fall back to killing the remote process via SSH.
+      if state.conn do
+        kill_remote_process(backend, state.conn, state.remote_node_name)
+      end
     end
 
     # Close SSH connection
     if state.conn do
-      try do
-        backend.close(state.conn)
-      rescue
-        _ -> :ok
-      catch
-        _, _ -> :ok
-      end
+      safe_call(fn -> backend.close(state.conn) end)
     end
 
     %{state | status: :disconnected, remote_node_name: nil, conn: nil}

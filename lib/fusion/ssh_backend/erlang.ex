@@ -106,14 +106,20 @@ defmodule Fusion.SshBackend.Erlang do
                 ref = Process.monitor(conn)
 
                 receive do
-                  {:ssh_cm, ^conn, {:closed, ^ch}} -> :ok
-                  {:DOWN, ^ref, :process, ^conn, _reason} -> :ok
+                  {:ssh_cm, ^conn, {:closed, ^ch}} ->
+                    Process.demonitor(ref, [:flush])
+
+                  {:DOWN, ^ref, :process, ^conn, _reason} ->
+                    :ok
                 after
                   @exec_async_timeout ->
+                    Process.demonitor(ref, [:flush])
+                    :ssh_connection.close(conn, ch)
                     Logger.warning("SSH exec_async timed out after #{@exec_async_timeout}ms")
                 end
 
               :failure ->
+                :ssh_connection.close(conn, ch)
                 Logger.warning("SSH exec_async failed: exec returned :failure")
             end
 
@@ -127,8 +133,15 @@ defmodule Fusion.SshBackend.Erlang do
 
   @impl true
   def close(conn) do
-    :ssh.close(conn)
-    Logger.debug("SSH connection closed")
+    try do
+      :ssh.close(conn)
+      Logger.debug("SSH connection closed")
+    rescue
+      e -> Logger.debug("SSH close failed: #{inspect(e)}")
+    catch
+      _, reason -> Logger.debug("SSH close failed: #{inspect(reason)}")
+    end
+
     :ok
   end
 

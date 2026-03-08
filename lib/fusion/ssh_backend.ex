@@ -21,10 +21,21 @@ defmodule Fusion.SshBackend do
   @callback reverse_tunnel(conn(), non_neg_integer(), String.t(), non_neg_integer()) ::
               {:ok, non_neg_integer()} | {:error, term()}
 
-  @doc "Execute a command on the remote host synchronously. Returns stdout."
+  @doc """
+  Execute a command on the remote host synchronously. Returns stdout on success.
+
+  Error shapes may vary by backend (e.g., `{:error, {:exit_code, code, stdout, stderr}}`
+  for the Erlang backend). Callers should match on `{:error, _}` generically.
+  """
   @callback exec(conn(), String.t()) :: {:ok, String.t()} | {:error, term()}
 
-  @doc "Execute a command on the remote host asynchronously. Returns an opaque process reference."
+  @doc """
+  Execute a command on the remote host asynchronously (fire-and-forget).
+
+  Returns `{:ok, ref}` where `ref` is an opaque reference. The caller should not
+  monitor or interact with this reference — it exists only to confirm the command
+  was launched. Output and exit status are discarded. Use `exec/2` if you need results.
+  """
   @callback exec_async(conn(), String.t()) :: {:ok, term()} | {:error, term()}
 
   @doc "Close the SSH connection."

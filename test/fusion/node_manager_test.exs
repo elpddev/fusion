@@ -48,6 +48,19 @@ defmodule Fusion.NodeManagerTest do
       assert NodeManager.disconnect(pid) == :ok
       GenServer.stop(pid)
     end
+
+    test "disconnect when connected resets state", %{target: target} do
+      {:ok, pid} = NodeManager.start_link(target)
+
+      :sys.replace_state(pid, fn state ->
+        %{state | status: :connected, remote_node_name: :disc_test@localhost, conn: :mock_conn}
+      end)
+
+      assert NodeManager.disconnect(pid) == :ok
+      assert NodeManager.status(pid) == :disconnected
+      assert NodeManager.remote_node(pid) == nil
+      GenServer.stop(pid)
+    end
   end
 
   describe "terminate/2" do
@@ -104,6 +117,14 @@ defmodule Fusion.NodeManagerTest do
       _ = :sys.get_state(pid)
       assert NodeManager.status(pid) == :disconnected
       assert NodeManager.remote_node(pid) == nil
+      GenServer.stop(pid)
+    end
+
+    test "ignores arbitrary messages", %{target: target} do
+      {:ok, pid} = NodeManager.start_link(target)
+      send(pid, :random_message)
+      _ = :sys.get_state(pid)
+      assert NodeManager.status(pid) == :disconnected
       GenServer.stop(pid)
     end
 

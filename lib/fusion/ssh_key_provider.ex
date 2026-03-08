@@ -65,26 +65,23 @@ defmodule Fusion.SshKeyProvider do
   end
 
   @impl true
-  def sign(key, data, _opts) do
-    hash = hash_for_key(key)
+  def sign(key, data, opts) do
+    # Prefer the hash algorithm from OTP's negotiation opts (e.g., rsa-sha2-512),
+    # falling back to our key-type-based default.
+    hash = Keyword.get(opts, :hash) || hash_for_key(key)
     :public_key.sign(data, hash, key)
   end
 
-  defp hash_for_key(key) do
-    case key do
-      # Ed25519/Ed448 — EdDSA does its own hashing
-      {:ed_pri, _, _, _} -> :none
-      {:ed_pub, _, _} -> :none
-      # OTP 28 may represent Ed25519 as ECPrivateKey with curve OID {1,3,101,112}
-      {:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 112}}, _, _} -> :none
-      # OTP 28 may represent Ed448 as ECPrivateKey with curve OID {1,3,101,113}
-      {:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 113}}, _, _} -> :none
-      # ECDSA (NIST curves)
-      {:ECPrivateKey, _, _, _, _, _} -> :sha256
-      # RSA — use sha256 for rsa-sha2-256 (modern default)
-      _ -> :sha256
-    end
-  end
+  # Ed25519/Ed448 — EdDSA does its own hashing
+  defp hash_for_key({:ed_pri, _, _, _}), do: :none
+  defp hash_for_key({:ed_pub, _, _}), do: :none
+  # OTP 28 may represent Ed25519/Ed448 as ECPrivateKey with curve OIDs
+  defp hash_for_key({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 112}}, _, _}), do: :none
+  defp hash_for_key({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 113}}, _, _}), do: :none
+  # ECDSA (NIST curves)
+  defp hash_for_key({:ECPrivateKey, _, _, _, _, _}), do: :sha256
+  # RSA — use sha256 for rsa-sha2-256 (modern default)
+  defp hash_for_key(_), do: :sha256
 
   defp decode_private_key(data) do
     # Try OpenSSH key v1 format first (modern ssh-keygen default),
@@ -109,33 +106,25 @@ defmodule Fusion.SshKeyProvider do
     _, _ -> {:error, :openssh_decode_failed}
   end
 
-  defp key_type_for_algorithm(algorithm) do
-    case algorithm do
-      :"ssh-ed25519" -> :ed25519
-      :"ssh-ed448" -> :ed448
-      :"ssh-rsa" -> :rsa
-      :"rsa-sha2-256" -> :rsa
-      :"rsa-sha2-512" -> :rsa
-      :"ecdsa-sha2-nistp256" -> :ecdsa
-      :"ecdsa-sha2-nistp384" -> :ecdsa
-      :"ecdsa-sha2-nistp521" -> :ecdsa
-      _ -> nil
-    end
-  end
+  defp key_type_for_algorithm(:"ssh-ed25519"), do: :ed25519
+  defp key_type_for_algorithm(:"ssh-ed448"), do: :ed448
+  defp key_type_for_algorithm(:"ssh-rsa"), do: :rsa
+  defp key_type_for_algorithm(:"rsa-sha2-256"), do: :rsa
+  defp key_type_for_algorithm(:"rsa-sha2-512"), do: :rsa
+  defp key_type_for_algorithm(:"ecdsa-sha2-nistp256"), do: :ecdsa
+  defp key_type_for_algorithm(:"ecdsa-sha2-nistp384"), do: :ecdsa
+  defp key_type_for_algorithm(:"ecdsa-sha2-nistp521"), do: :ecdsa
+  defp key_type_for_algorithm(_), do: nil
 
-  defp key_type(key) do
-    case key do
-      {:ed_pri, :ed25519, _, _} -> :ed25519
-      {:ed_pri, :ed448, _, _} -> :ed448
-      # OTP 28 may represent Ed25519/Ed448 as ECPrivateKey with a namedCurve OID
-      {:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 112}}, _, _} -> :ed25519
-      {:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 113}}, _, _} -> :ed448
-      # ECDSA curves (NIST P-256/P-384/P-521)
-      {:ECPrivateKey, _, _, {:namedCurve, _}, _, _} -> :ecdsa
-      {:RSAPrivateKey, _, _, _, _, _, _, _, _, _, _} -> :rsa
-      _ -> :unknown
-    end
-  end
+  defp key_type({:ed_pri, :ed25519, _, _}), do: :ed25519
+  defp key_type({:ed_pri, :ed448, _, _}), do: :ed448
+  # OTP 28 may represent Ed25519/Ed448 as ECPrivateKey with namedCurve OIDs
+  defp key_type({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 112}}, _, _}), do: :ed25519
+  defp key_type({:ECPrivateKey, _, _, {:namedCurve, {1, 3, 101, 113}}, _, _}), do: :ed448
+  # ECDSA curves (NIST P-256/P-384/P-521)
+  defp key_type({:ECPrivateKey, _, _, {:namedCurve, _}, _, _}), do: :ecdsa
+  defp key_type({:RSAPrivateKey, _, _, _, _, _, _, _, _, _, _}), do: :rsa
+  defp key_type(_), do: :unknown
 
   defp decode_pem_key(data) do
     case :public_key.pem_decode(data) do
